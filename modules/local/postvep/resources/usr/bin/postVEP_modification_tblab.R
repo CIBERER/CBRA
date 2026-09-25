@@ -21,7 +21,7 @@ option_list = list(
               help="\t\tAutomap output file (optional)", metavar="character"),
   
   make_option(c("-f", "--maf"), type="double", default=0.1,
-               help="\t\tMinimum allele frequency to filter", metavar="character"),
+               help="\t\tMinimum allele frequency to filter (currently unused)", metavar="double"),
   
   make_option(c("-s", "--SGDS"), type="character", default=NULL,
             help="\t\tGLOWgenes Score of Gene-Disease Specificity", metavar="character"),
@@ -70,6 +70,35 @@ omim_path = opt$omim
 genefilter_path = opt$genefilter
 panels_path = opt$panel_annotation_file
 
+required_args <- c("input", "output", "dbNSFPgene", "domino", "expression")
+missing_args <- required_args[vapply(required_args, function(x) is.null(opt[[x]]), logical(1))]
+if (length(missing_args) > 0) {
+  stop("Missing required arguments: ", paste0("--", missing_args, collapse = ", "))
+}
+
+#############
+# Functions #
+#############
+
+# First value of a comma-separated field, as numeric
+first_num <- function(x) suppressWarnings(as.numeric(sub(",.*$", "", x)))
+
+# Mean of a comma-separated field ("-" values are counted as 0)
+mean_num <- function(x) {
+  vapply(x, function(v) mean(suppressWarnings(as.numeric(strsplit(gsub("(?<![eE])-", "0", v, perl = T), ",")[[1]]))),
+         numeric(1), USE.NAMES = FALSE)
+}
+
+# Left join by gene, warning if the annotation table duplicates variants
+merge_by_gene <- function(x, y, by.x, by.y, name) {
+  n_before <- nrow(x)
+  res <- merge(x, y, by.x = by.x, by.y = by.y, all.x = T)
+  if (nrow(res) != n_before) {
+    print(paste0("WARNING: ", name, " has repeated genes; ", nrow(res) - n_before, " variant rows were duplicated"))
+  }
+  res
+}
+
 ################
 # Data loading # 
 ################
@@ -91,13 +120,17 @@ if (length(start_line) == 0 || is.na(start_line)) {
 # Fichero temporal en el mismo directorio de trabajo (con espacio garantizado),
 # en vez de depender de /tmp
 tmp_file <- file.path(dirname(input), "vep_body_tmp.tsv")
-system(paste0("zcat ", shQuote(input), " | tail -n +", start_line, " > ", shQuote(tmp_file)))
+# zcat -f also works with uncompressed input
+status <- system(paste0("zcat -f ", shQuote(input), " | tail -n +", start_line, " > ", shQuote(tmp_file)))
+if (status != 0) {
+  stop("Error extracting the body of the VEP file")
+}
 
 vep <- fread(tmp_file, header = TRUE, sep = "\t",
              colClasses = "character", quote = "",
              data.table = TRUE, na.strings = c("", "NA", "-"))
 
-file.remove(tmp_file)
+invisible(file.remove(tmp_file))
 
 if ("Uploaded_variation" %in% colnames(vep) && !("#Uploaded_variation" %in% colnames(vep))) {
   setnames(vep, "Uploaded_variation", "#Uploaded_variation")
@@ -111,7 +144,7 @@ if (!is.null(genefilter_path)){
 }
 
 # Gene Filter
-if ((!is.null(genefilter_path)) & (is.null(glowgenes_path))){
+if (!is.null(genefilter_path) && is.null(glowgenes_path)){
   vep = vep[vep$SYMBOL %in% genefilter$V1,]
 }
 
@@ -126,7 +159,7 @@ if (nrow(vep) == 0) {
 
 # dbNSFP gene
 dbNSFP_gene = read.delim(dbNSFPgenepath, header = TRUE, stringsAsFactors = F, quote = "")
-vep = merge(vep, dbNSFP_gene, by.x = "SYMBOL", by.y = "Gene_name", all.x = T)
+vep = merge_by_gene(vep, dbNSFP_gene, "SYMBOL", "Gene_name", "dbNSFP_gene")
 
 #### include GLOWgenes and SGDS if included
 if (!is.null(glowgenes_path)){
@@ -134,30 +167,27 @@ if (!is.null(glowgenes_path)){
   glowgenes = read.delim(glowgenes_path, header = F, stringsAsFactors = F, quote = "", check.names=F)
   colnames(glowgenes) = c("SYMBOL", "score", "GLOWgenes")
 
-  # Add 0 to the genes used to run GLOWgenes but that are not in the output file of GLOWgenes
+  # The genes of the list (used to run GLOWgenes) are the genes from the panel: they get GLOWgenes = 0.
+  # They are removed from the GLOWgenes output to avoid duplicated rows in the merge
   if (!is.null(genefilter_path)){
-    genefilter$score = NA
-    genefilter$GLOWgenes = 0
-    colnames(genefilter) = c("SYMBOL", "score", "GLOWgenes")
-  
-    glowgenes = rbind(genefilter, glowgenes)
+    panel_genes = data.frame(SYMBOL = unique(genefilter$V1), score = NA, GLOWgenes = 0, stringsAsFactors = F)
+    glowgenes = rbind(panel_genes, glowgenes[!glowgenes$SYMBOL %in% panel_genes$SYMBOL, ])
   }
 
-  vep = merge(vep, glowgenes[c("SYMBOL", "GLOWgenes")], by= "SYMBOL", all.x = T)
+  vep = merge_by_gene(vep, glowgenes[c("SYMBOL", "GLOWgenes")], "SYMBOL", "SYMBOL", "GLOWgenes")
 }
 
 if (!is.null(SGDS_path)) {
   print("Include GLOWgenes SGDS")
   SGDS <- read.delim(SGDS_path, sep = ",", header = TRUE, stringsAsFactors = FALSE, quote = "", check.names = FALSE)
   colnames(SGDS) = c("SYMBOL", "SGDS", "GLOWgenes_best_ranking", "GLOWgenes_median_ranking")
-  vep = merge(vep, SGDS, by = "SYMBOL", all.x = T)
-  
+  vep = merge_by_gene(vep, SGDS, "SYMBOL", "SYMBOL", "SGDS")
 }
 
-# Gene-Panel 
+# Gene-Panel
 if (!is.null(panels_path)){
   gene_panel = read.delim(panels_path, header = TRUE, stringsAsFactors = F, quote = "")
-  vep = merge(vep, gene_panel, by.x = "SYMBOL", by.y = "gene", all.x = T)
+  vep = merge_by_gene(vep, gene_panel, "SYMBOL", "gene", "Gene-Panel")
 }
 
 #### OMIM
@@ -166,7 +196,7 @@ if (!is.null(omim_path)){
   omim = read.delim(omim_path, header = F, stringsAsFactors = F, comment.char = "#", quote = "", check.names=F)
   colnames(omim) = c("Chromosome", "Genomic_Position_Start", "Genomic Position End", "Cyto_Location", "Computed_Cyto_Location", "MIM_Number",
     "Gene_Symbols", "Gene_Name",	"Approved_Gene_Symbol", "Entrez_Gene_ID", "Ensembl_Gene_ID", "Comments", "Phenotypes", "Mouse_Gene_Symbol-ID")
-  vep = merge(vep, omim, by.x = "SYMBOL", by.y = "Approved_Gene_Symbol", all.x = T)
+  vep = merge_by_gene(vep, omim, "SYMBOL", "Approved_Gene_Symbol", "OMIM")
 }
 
 #### Region dictionary
@@ -180,28 +210,15 @@ if (!is.null(dict_region_path)){
 
 # include domino
 domino = read.delim(dominopath, header = TRUE, stringsAsFactors = F, quote = "")
-vep = merge(vep, domino, by.x = "SYMBOL", by.y = "Gene_name", all.x = T)
+vep = merge_by_gene(vep, domino, "SYMBOL", "Gene_name", "domino")
 
 # include tissue expression
 expression = read.delim(expression_path, header = TRUE, stringsAsFactors = F, quote = "")
-vep = merge(vep, expression, by.x = "SYMBOL", by.y = "Gene.name", all.x = T)
+vep = merge_by_gene(vep, expression, "SYMBOL", "Gene.name", "expression")
 
 
 ### create output dataframe
 df_out  = data.frame(row.names = 1:nrow(vep), stringsAsFactors = F)
-
-## Save the columns that will be added later to the output 
-
-# Remove columns starting with "SAMPLE"
-columns_to_remove <- grep("^SAMPLE", colnames(vep))
-# Add "USED_REF" and "Allele" to the removal
-columns_to_remove <- c(columns_to_remove, which(colnames(vep) %in% c("#Uploaded_variation","USED_REF", "Allele")))
-
-# Subset the dataframe
-vep_cleaned_columns <- vep[, !columns_to_remove, with = FALSE]
-
-# View the cleaned dataframe
-print((vep_cleaned_columns))
 
 
 #==================================#
@@ -209,7 +226,7 @@ print((vep_cleaned_columns))
 #==================================#
 print("Basic information of the variant")
 
-df_out$CHROM = unlist(lapply(vep$Location, function(x) strsplit(x, ":")[[1]][1]))
+df_out$CHROM = sub(":.*$", "", vep$Location)
 df_out$POS = as.numeric(unlist(lapply(vep$`#Uploaded_variation`, function(x) rev(strsplit(x, "_")[[1]])[2])))
 df_out$REF = vep$USED_REF
 df_out$ALT = vep$Allele
@@ -218,19 +235,14 @@ df_out$Location = vep$Location
 df_out$SYMBOL = vep$SYMBOL
 df_out$Gene_full_name = vep$Gene_full_name
 if (!is.null(glowgenes_path)) df_out$GLOWgenes = vep$GLOWgenes
-if ((!is.null(genefilter_path)) & (!is.null(glowgenes_path))) df_out$GLOWgenes[df_out$SYMBOL %in% genefilter$V1] = 0 # We assume the genes of the list are the genes from the panel
-if (!is.null(SGDS_path)) df_out$SGDS = vep$SGDS
-if (!is.null(SGDS_path)) df_out$GLOWgenes_best_ranking = vep$GLOWgenes_best_ranking
-if (!is.null(SGDS_path)) df_out$GLOWgenes_median_ranking = vep$GLOWgenes_median_ranking
+if (!is.null(SGDS_path)) {
+  df_out$SGDS = vep$SGDS
+  df_out$GLOWgenes_best_ranking = vep$GLOWgenes_best_ranking
+  df_out$GLOWgenes_median_ranking = vep$GLOWgenes_median_ranking
+}
 df_out$VARIANT_CLASS = vep$VARIANT_CLASS
 df_out$Panels_name = vep$panels
 
-
-#=====================#
-# Add all the columns #
-#=====================#
-
-#df_out <- cbind(df_out, vep_cleaned_columns)
 
 #=====================#
 # Feature information #
@@ -238,7 +250,14 @@ df_out$Panels_name = vep$panels
 print("Feature information")
 
 df_out$Existing_variation = vep$Existing_variation
-if (!is.null(dict_region_path)) df_out$Genomic_region = unlist(lapply(vep$Consequence, function(x) as.character(dict_region[strsplit(x, ",")[[1]],2])[which.min(dict_region[strsplit(x, ",")[[1]],2])]))
+# Region with the highest priority among the consequences of the variant (NA if none is in the dictionary)
+if (!is.null(dict_region_path)) {
+  df_out$Genomic_region = vapply(vep$Consequence, function(x) {
+    regions = dict_region[strsplit(x, ",")[[1]], 2]
+    if (all(is.na(regions))) return(NA_character_)
+    as.character(regions[which.min(regions)])
+  }, character(1), USE.NAMES = FALSE)
+}
 df_out$CANONICAL = vep$CANONICAL
 df_out$Feature = vep$Feature
 df_out$Feature_type = vep$Feature_type
@@ -278,43 +297,43 @@ df_out$PUBMED = vep$PUBMED
 #=============#
 print("Frequencies")
 
-df_out$gnomADg_AF =  as.numeric(unlist(lapply(vep$gnomADg_AF, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADg_AC = as.numeric(unlist(lapply(vep$gnomADg_AC, function(x) strsplit(x, ",")[[1]][1]))) 
-df_out$gnomADg_AN = as.numeric(unlist(lapply(vep$gnomADg_AN, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADg_nhomalt = as.numeric(unlist(lapply(vep$gnomADg_nhomalt, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADg_cov_median = round(unlist(lapply(vep$gnomADg_cov_median, function(x) mean(as.numeric(strsplit(gsub("(?<![eE])-","0",x, perl = T), ",")[[1]])))))
-df_out$gnomADg_cov_perc_20x = round(unlist(lapply(vep$gnomADg_cov_perc_20x, function(x) mean(as.numeric(strsplit(gsub("(?<![eE])-","0",x, perl = T), ",")[[1]])))),2)
+df_out$gnomADg_AF = first_num(vep$gnomADg_AF)
+df_out$gnomADg_AC = first_num(vep$gnomADg_AC)
+df_out$gnomADg_AN = first_num(vep$gnomADg_AN)
+df_out$gnomADg_nhomalt = first_num(vep$gnomADg_nhomalt)
+df_out$gnomADg_cov_median = round(mean_num(vep$gnomADg_cov_median))
+df_out$gnomADg_cov_perc_20x = round(mean_num(vep$gnomADg_cov_perc_20x), 2)
 df_out$gnomADg_filter = vep$gnomADg_filt
 df_out$gnomADg_popmax = vep$gnomADg_grpmax
 df_out$gnomADg_AF_popmax = vep$gnomADg_AF_grpmax
-df_out$gnomADg_AC_popmax = as.numeric(unlist(lapply(vep$gnomADg_AC_grpmax, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADg_AF_nfe = as.numeric(unlist(lapply(vep$gnomADg_AF_nfe, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADg_AC_nfe = as.numeric(unlist(lapply(vep$gnomADg_AC_nfe, function(x) strsplit(x, ",")[[1]][1])))
+df_out$gnomADg_AC_popmax = first_num(vep$gnomADg_AC_grpmax)
+df_out$gnomADg_AF_nfe = first_num(vep$gnomADg_AF_nfe)
+df_out$gnomADg_AC_nfe = first_num(vep$gnomADg_AC_nfe)
 
-df_out$gnomADe_AF = as.numeric(unlist(lapply(vep$gnomADe_AF, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADe_AC = as.numeric(unlist(lapply(vep$gnomADe_AC, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADe_AN = as.numeric(unlist(lapply(vep$gnomADe_AN, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADe_nhomalt = as.numeric(unlist(lapply(vep$gnomADe_nhomalt, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADe_cov_median = round(unlist(lapply(vep$gnomADe_cov_median, function(x) mean(as.numeric(strsplit(gsub("(?<![eE])-","0",x, perl = T), ",")[[1]])))))
-df_out$gnomADe_cov_perc_20x = round(unlist(lapply(vep$gnomADe_cov_perc_20x, function(x) mean(as.numeric(strsplit(gsub("(?<![eE])-","0",x, perl = T), ",")[[1]])))),2)
+df_out$gnomADe_AF = first_num(vep$gnomADe_AF)
+df_out$gnomADe_AC = first_num(vep$gnomADe_AC)
+df_out$gnomADe_AN = first_num(vep$gnomADe_AN)
+df_out$gnomADe_nhomalt = first_num(vep$gnomADe_nhomalt)
+df_out$gnomADe_cov_median = round(mean_num(vep$gnomADe_cov_median))
+df_out$gnomADe_cov_perc_20x = round(mean_num(vep$gnomADe_cov_perc_20x), 2)
 df_out$gnomADe_filter = vep$gnomADe_filt
 df_out$gnomADe_popmax = vep$gnomADe_grpmax
 df_out$gnomADe_AF_popmax = vep$gnomADe_AF_grpmax
-df_out$gnomADe_AC_popmax = as.numeric(unlist(lapply(vep$gnomADe_AC_grpmax, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADe_AF_nfe = as.numeric(unlist(lapply(vep$gnomADe_AF_nfe, function(x) strsplit(x, ",")[[1]][1])))
-df_out$gnomADe_AC_nfe = as.numeric(unlist(lapply(vep$gnomADe_AC_nfe, function(x) strsplit(x, ",")[[1]][1])))
+df_out$gnomADe_AC_popmax = first_num(vep$gnomADe_AC_grpmax)
+df_out$gnomADe_AF_nfe = first_num(vep$gnomADe_AF_nfe)
+df_out$gnomADe_AC_nfe = first_num(vep$gnomADe_AC_nfe)
 
 df_out$kaviar_AF = vep$Kaviar_AF
 df_out$kaviar_AC = vep$Kaviar_AC
-df_out$CSVS_AF = as.numeric(unlist(lapply(vep$CSVS_AF, function(x) strsplit(x, ",")[[1]][1])))
-df_out$CSVS_AC = as.numeric(unlist(lapply(vep$CSVS_AC, function(x) strsplit(x, ",")[[1]][1])))
-df_out$FJD_MAF_AF = as.numeric(unlist(lapply(vep$FJD_MAF_AF, function(x) strsplit(x, ",")[[1]][1])))
-df_out$FJD_MAF_AC = as.numeric(unlist(lapply(vep$FJD_MAF_AC, function(x) strsplit(x, ",")[[1]][1])))
+df_out$CSVS_AF = first_num(vep$CSVS_AF)
+df_out$CSVS_AC = first_num(vep$CSVS_AC)
+df_out$FJD_MAF_AF = first_num(vep$FJD_MAF_AF)
+df_out$FJD_MAF_AC = first_num(vep$FJD_MAF_AC)
 ##add new columns del MAF_FJD de DHR vs pseudocontroles (SON DE OJO LOS PSEUDOCONTROLES)
-df_out$FJD_MAF_AF_DS_IRD = as.numeric(unlist(lapply(vep$FJD_MAF_AF_DS_irdt, function(x) strsplit(x, ",")[[1]][1])))
-df_out$FJD_MAF_AC_DS_IRD = as.numeric(unlist(lapply(vep$FJD_MAF_AC_DS_irdt, function(x) strsplit(x, ",")[[1]][1])))
-df_out$FJD_MAF_AF_P_IRD = as.numeric(unlist(lapply(vep$FJD_MAF_AF_P_eyeg, function(x) strsplit(x, ",")[[1]][1])))
-df_out$FJD_MAF_AC_P_IRD = as.numeric(unlist(lapply(vep$FJD_MAF_AC_P_eyeg, function(x) strsplit(x, ",")[[1]][1])))
+df_out$FJD_MAF_AF_DS_IRD = first_num(vep$FJD_MAF_AF_DS_irdt)
+df_out$FJD_MAF_AC_DS_IRD = first_num(vep$FJD_MAF_AC_DS_irdt)
+df_out$FJD_MAF_AF_P_IRD = first_num(vep$FJD_MAF_AF_P_eyeg)
+df_out$FJD_MAF_AC_P_IRD = first_num(vep$FJD_MAF_AC_P_eyeg)
                                              
 df_out$denovoVariants_SAMPLE_CT = vep$denovoVariants_SAMPLE_CT
 
@@ -332,20 +351,24 @@ df_out$CADD_RAW = as.numeric(vep$CADD_RAW)
 df_out$MutScore = as.numeric(vep$Mut_Score)
 df_out$REVELScore = as.numeric(vep$REVEL_Score)
 
+# Normalise the predictions to D (damaging), T (tolerated) or "" (no prediction).
+# All values are compared in lower case.
 patho_norm_func = function(predictions){
   predictions = gsub(";", ",", predictions)
   predictions = tolower(predictions)
-  unlist(lapply(predictions, function(x) {
+  # VEP SIFT/PolyPhen (--everything) include the score: "tolerated(0.06)"
+  predictions = gsub("\\([^)]*\\)", "", predictions)
+  vapply(predictions, function(x) {
     y = strsplit(x,",")[[1]]
-    y = y[!y %in% c("-", ".", "U", "")]
-    y[y %in% c("tolerated", "tolerated_low_confidence", "benign", "n", "l", "p", "t")] = "T"
-    y[y %in% c("deleterious", "deleterious_low_confidence", "probably_damaging", 
-               "possibly_damaging", "a", "m", "h", "d", "Dominant", "Recessive")] = "D"
+    y = y[!y %in% c("-", ".", "u", "")]
+    y[y %in% c("tolerated", "tolerated_low_confidence", "benign", "tolerant", "n", "l", "p", "t")] = "T"
+    y[y %in% c("deleterious", "deleterious_low_confidence", "probably_damaging",
+               "possibly_damaging", "a", "m", "h", "d", "dominant", "recessive")] = "D"
     if ("D" %in% y) { return("D") }
     else if ("T" %in% y) { return("T") }
     else {return("")}
-  }))
-}  
+  }, character(1), USE.NAMES = FALSE)
+}
 
 df_pathogenic_predictors = data.frame(row.names = 1:nrow(vep))
 df_pathogenic_predictors$SIFT = patho_norm_func(vep$SIFT)
@@ -372,10 +395,8 @@ df_pathogenic_predictors$`fathmm-MKL_coding_pred` = patho_norm_func(vep$`fathmm-
 df_pathogenic_predictors$`fathmm-XF_coding_pred` = patho_norm_func(vep$`fathmm-XF_coding_pred`)
   
 
-df_out$N_Pathogenic_pred = apply(df_pathogenic_predictors, 1, function(x) table(x)["D"])
-df_out$N_Pathogenic_pred[is.na(df_out$N_Pathogenic_pred)] = 0
-df_out$N_Benign_pred = apply(df_pathogenic_predictors, 1, function(x) table(x)["T"])
-df_out$N_Benign_pred[is.na(df_out$N_Benign_pred)] = 0
+df_out$N_Pathogenic_pred = rowSums(df_pathogenic_predictors == "D")
+df_out$N_Benign_pred = rowSums(df_pathogenic_predictors == "T")
 df_out$N_predictions = df_out$N_Pathogenic_pred + df_out$N_Benign_pred
 df_out$Pathogenic_pred = apply(df_pathogenic_predictors, 1, function(x) paste(names(x)[which(x == "D")], collapse = ","))
 df_out$Benign_pred = apply(df_pathogenic_predictors, 1, function(x) paste(names(x)[which(x == "T")], collapse = ","))
@@ -387,120 +408,50 @@ df_out$Benign_pred = apply(df_pathogenic_predictors, 1, function(x) paste(names(
 #=====================#
 # Splicing predictors #
 #=====================#
-# print("Splicing predictors")
-
-# # Select one splice prediction per row
-# for (j in c("SpliceAI_SNV_SpliceAI", "SpliceAI_INDEL_SpliceAI")){
-#   multi_gene_sites = grep(",",vep[,j])
-#   for (i in multi_gene_sites){
-#     splice_predictions = do.call("rbind",strsplit(strsplit(vep[i,j], ",")[[1]], "|",fixed = T))
-#     if (vep$SYMBOL[i] %in% splice_predictions[,2]) {
-#       vep[i,j] = paste(splice_predictions[splice_predictions[,2] == vep$SYMBOL[i],,drop = F][1,],collapse = "|")
-#     } else {
-#       max_value_row = which(splice_predictions[,3:6] == max(splice_predictions[,3:6]), arr.ind = TRUE)[1,1]
-#       vep[i,j] = paste(splice_predictions[max_value_row,],collapse = "|")
-#     }
-#   }
-# }
-# # Merge SpliceAI predictions for INDELs and SNVs 
-# vep$SpliceAI_INDEL_SpliceAI[vep$SpliceAI_INDEL_SpliceAI == "-"] = vep$SpliceAI_SNV_SpliceAI[vep$SpliceAI_INDEL_SpliceAI == "-"]
-# # Create data.frame with separated SpliceAI values
-# SpliceAI = data.frame(do.call("rbind", strsplit(vep$SpliceAI_INDEL_SpliceAI, "|", fixed = T)), stringsAsFactors = F)
-# colnames(SpliceAI) = c("ALLELE", "SYMBOL", "DS_AG", "DS_AL", "DS_DG", "DS_DL", "DP_AG", "DP_AL", "DP_DG", "DP_DL")
-# df_out$SpliceAI_SYMBOL = SpliceAI$SYMBOL
-# df_out$SpliceAI_DS_AG = as.numeric(SpliceAI$DS_AG)
-# df_out$SpliceAI_DS_AL = as.numeric(SpliceAI$DS_AL)
-# df_out$SpliceAI_DS_DG = as.numeric(SpliceAI$DS_DG)
-# df_out$SpliceAI_DS_DL = as.numeric(SpliceAI$DS_DL)
-# df_out$SpliceAI_DS_Max = apply(df_out[c("SpliceAI_DS_AG", "SpliceAI_DS_AL", "SpliceAI_DS_DG", "SpliceAI_DS_DL")], 1, max)                           
-# df_out$SpliceAI_DP_AG = as.numeric(SpliceAI$DP_AG)
-# df_out$SpliceAI_DP_AL = as.numeric(SpliceAI$DP_AL)
-# df_out$SpliceAI_DP_DG = as.numeric(SpliceAI$DP_DG)
-# df_out$SpliceAI_DP_DL = as.numeric(SpliceAI$DP_DL)
-
-# df_out$ada_score = as.numeric(vep$ada_score)
-# df_out$rf_score = as.numeric(vep$rf_score)
-# df_out$MaxEntScan_alt = as.numeric(vep$MaxEntScan_alt)
-# df_out$MaxEntScan_diff = as.numeric(vep$MaxEntScan_diff)
-# df_out$MaxEntScan_ref = as.numeric(vep$MaxEntScan_ref)
-
 print("Splicing predictors")
 
-# Select one SpliceAI prediction per row
-for (j in c("SpliceAI_SNV_SpliceAI", "SpliceAI_INDEL_SpliceAI")) {
+spliceai_cols = c("SpliceAI_SNV_SpliceAI", "SpliceAI_INDEL_SpliceAI")
 
-  multi_gene_sites <- which(
-    !is.na(vep[[j]]) &
-      vep[[j]] != "-" &
-      grepl(",", vep[[j]], fixed = TRUE)
-  )
+# Select one SpliceAI prediction per row
+for (j in spliceai_cols) {
+
+  if (!j %in% colnames(vep)) {
+    print(paste0("There is no ", j, " column"))
+    vep[, (j) := NA_character_]
+  }
+
+  multi_gene_sites <- which(!is.na(vep[[j]]) & grepl(",", vep[[j]], fixed = TRUE))
 
   for (i in multi_gene_sites) {
 
-    splice_predictions <- do.call(
-      rbind,
-      strsplit(
-        strsplit(vep[[j]][i], ",", fixed = TRUE)[[1]],
-        "|",
-        fixed = TRUE
-      )
-    )
+    splice_predictions <- do.call(rbind, strsplit(strsplit(vep[[j]][i], ",", fixed = TRUE)[[1]], "|", fixed = TRUE))
 
     # Skip malformed annotations
     if (ncol(splice_predictions) < 10)
       next
 
     # If one prediction matches the annotated SYMBOL, keep it
-    if (!is.na(vep$SYMBOL[i]) &&
-        vep$SYMBOL[i] %in% splice_predictions[, 2]) {
-
-      vep[[j]][i] <- paste(
-        splice_predictions[
-          splice_predictions[, 2] == vep$SYMBOL[i],
-          ,
-          drop = FALSE
-        ][1, ],
-        collapse = "|"
-      )
-
+    if (!is.na(vep$SYMBOL[i]) && vep$SYMBOL[i] %in% splice_predictions[, 2]) {
+      selected_row <- which(splice_predictions[, 2] == vep$SYMBOL[i])[1]
     } else {
-
-      # Otherwise keep the transcript with the highest DS score
-      scores <- apply(
-        splice_predictions[, 3:6, drop = FALSE],
-        2,
-        as.numeric
-      )
-
-      max_value_row <- which.max(
-        apply(scores, 1, max, na.rm = TRUE)
-      )
-
-      vep[[j]][i] <- paste(
-        splice_predictions[max_value_row, ],
-        collapse = "|"
-      )
+      # Otherwise keep the prediction with the highest DS score
+      scores <- suppressWarnings(matrix(as.numeric(splice_predictions[, 3:6]), ncol = 4))
+      max_scores <- suppressWarnings(apply(scores, 1, max, na.rm = TRUE))
+      selected_row <- which.max(max_scores)
+      if (length(selected_row) == 0) selected_row <- 1
     }
+
+    set(vep, i = i, j = j, value = paste(splice_predictions[selected_row, ], collapse = "|"))
   }
 }
 
-## YBQ: añadido nuevo porque ahora me falla el paso siguiente si hay NA en vez de "-" en SpliceAI_INDEL_SpliceAI o SpliceAI_SNV_SpliceAI
-print("Replace NA with '-' in SpliceAI columns")
-vep$SpliceAI_INDEL_SpliceAI[is.na(vep$SpliceAI_INDEL_SpliceAI)] <- "-"
-vep$SpliceAI_SNV_SpliceAI[is.na(vep$SpliceAI_SNV_SpliceAI)] <- "-"
-
-# Merge SNV predictions into INDEL predictions when INDEL annotation is absent
-vep$SpliceAI_INDEL_SpliceAI[
-  vep$SpliceAI_INDEL_SpliceAI == "-"
-] <-
-  vep$SpliceAI_SNV_SpliceAI[
-    vep$SpliceAI_INDEL_SpliceAI == "-"
-  ]
-
+# Use the SNV prediction when there is no INDEL prediction
+no_indel <- is.na(vep$SpliceAI_INDEL_SpliceAI)
+vep$SpliceAI_INDEL_SpliceAI[no_indel] <- vep$SpliceAI_SNV_SpliceAI[no_indel]
 
 split_spliceai <- function(x) {
 
-  if (is.na(x) || x == "-")
+  if (is.na(x))
     return(rep(NA_character_, 10))
 
   parts <- strsplit(x, "|", fixed = TRUE)[[1]]
@@ -509,50 +460,24 @@ split_spliceai <- function(x) {
   parts
 }
 
-SpliceAI <- data.frame(
-  do.call(
-    rbind,
-    lapply(vep$SpliceAI_INDEL_SpliceAI, split_spliceai)
-  ),
-  stringsAsFactors = FALSE
-)
-
-colnames(SpliceAI) <- c(
-  "ALLELE",
-  "SYMBOL",
-  "DS_AG",
-  "DS_AL",
-  "DS_DG",
-  "DS_DL",
-  "DP_AG",
-  "DP_AL",
-  "DP_DG",
-  "DP_DL"
-)
+SpliceAI <- data.frame(do.call(rbind, lapply(vep$SpliceAI_INDEL_SpliceAI, split_spliceai)), stringsAsFactors = FALSE)
+colnames(SpliceAI) <- c("ALLELE", "SYMBOL", "DS_AG", "DS_AL", "DS_DG", "DS_DL", "DP_AG", "DP_AL", "DP_DG", "DP_DL")
 
 df_out$SpliceAI_SYMBOL <- SpliceAI$SYMBOL
+df_out$SpliceAI_DS_AG <- suppressWarnings(as.numeric(SpliceAI$DS_AG))
+df_out$SpliceAI_DS_AL <- suppressWarnings(as.numeric(SpliceAI$DS_AL))
+df_out$SpliceAI_DS_DG <- suppressWarnings(as.numeric(SpliceAI$DS_DG))
+df_out$SpliceAI_DS_DL <- suppressWarnings(as.numeric(SpliceAI$DS_DL))
 
-df_out$SpliceAI_DS_AG <- as.numeric(SpliceAI$DS_AG)
-df_out$SpliceAI_DS_AL <- as.numeric(SpliceAI$DS_AL)
-df_out$SpliceAI_DS_DG <- as.numeric(SpliceAI$DS_DG)
-df_out$SpliceAI_DS_DL <- as.numeric(SpliceAI$DS_DL)
+# Maximum DS score (NA when there is no SpliceAI score, instead of -Inf)
+ds_scores <- df_out[, c("SpliceAI_DS_AG", "SpliceAI_DS_AL", "SpliceAI_DS_DG", "SpliceAI_DS_DL")]
+df_out$SpliceAI_DS_Max <- ifelse(rowSums(!is.na(ds_scores)) == 0, NA,
+                                 suppressWarnings(apply(ds_scores, 1, max, na.rm = TRUE)))
 
-df_out$SpliceAI_DS_Max <- apply(
-  df_out[, c(
-    "SpliceAI_DS_AG",
-    "SpliceAI_DS_AL",
-    "SpliceAI_DS_DG",
-    "SpliceAI_DS_DL"
-  )],
-  1,
-  max,
-  na.rm = TRUE
-)
-
-df_out$SpliceAI_DP_AG <- as.numeric(SpliceAI$DP_AG)
-df_out$SpliceAI_DP_AL <- as.numeric(SpliceAI$DP_AL)
-df_out$SpliceAI_DP_DG <- as.numeric(SpliceAI$DP_DG)
-df_out$SpliceAI_DP_DL <- as.numeric(SpliceAI$DP_DL)
+df_out$SpliceAI_DP_AG <- suppressWarnings(as.numeric(SpliceAI$DP_AG))
+df_out$SpliceAI_DP_AL <- suppressWarnings(as.numeric(SpliceAI$DP_AL))
+df_out$SpliceAI_DP_DG <- suppressWarnings(as.numeric(SpliceAI$DP_DG))
+df_out$SpliceAI_DP_DL <- suppressWarnings(as.numeric(SpliceAI$DP_DL))
 
 df_out$ada_score <- as.numeric(vep$ada_score)
 df_out$rf_score <- as.numeric(vep$rf_score)
@@ -616,84 +541,84 @@ df_out$variant_id = vep$SAMPLE_variant_id
 #====================#
 print("Sample information")
 
-samples = unique(gsub("_.*$", "", gsub("^SAMPLE_", "", colnames(vep)[grepl(".*_GT$", colnames(vep), perl = T)])))
-for (sample in samples){
-  for (field in c("GT", "VAF", "AD", "DP", "SF", "GD", "GQ", "FT")){
-    tryCatch(
-      {
-        print(paste0(sample, "_", field))
-        df_out[,paste0(sample, "_", field)] = vep[,paste0("SAMPLE_", sample, "_", field)]
-      },
-      error=function(e) print(paste0("There is no ", field, " information of the sample ", sample)),
-      warning=function(e) print(paste0("There is no ", field, " information of the sample ", sample))
-      )
-  }
-  df_out[,paste0(sample, "_ROH")] <- "NaN"
-  # Sacar del output de autopmap
-  tryCatch(
-    {
-      automap = read.delim(automap_path, header = F, comment.char = "#", stringsAsFactors = F)
-      df_out[,paste0(sample,"_ROH")] = "False"
-      for (i in 1:nrow(automap)) {
-        df_out[df_out$POS >= automap$V2[i] & df_out$POS <= automap$V3[i] & gsub("chr","",df_out$CHROM) == gsub("chr","",automap$V1[i]), paste0(sample,"_ROH")] = "True"
-      }
-    },
-    error = function(e) {
-    # Handle errors: File not found or other issues
-    print(paste0("There is no AutoMap information for the sample ", sample))
-    },
-    warning = function(w) {
-    # Handle warnings
-    print(paste0("Warning encountered for the sample ", sample, ": ", conditionMessage(w)))
+# Sample columns are SAMPLE_{sample}_{field}. The merged VCF also has SAMPLE_{sample}_{program}_GT columns,
+# so a sample is a name with both _GT and _GD columns (or with _GT if there are no _GD columns).
+# This also works with sample names that contain "_".
+gt_columns = grep("^SAMPLE_.+_GT$", colnames(vep), value = TRUE)
+samples = unique(sub("_GT$", "", sub("^SAMPLE_", "", gt_columns)))
+samples_with_gd = samples[paste0("SAMPLE_", samples, "_GD") %in% colnames(vep)]
+if (length(samples_with_gd) > 0) samples = samples_with_gd
+print(paste0("Samples: ", paste(samples, collapse = ", ")))
+
+# Copy the columns SAMPLE_{sample}_{field} to df_out as {sample}_{field}
+copy_sample_fields <- function(df, sample, fields) {
+  src = paste0("SAMPLE_", sample, "_", fields)
+  present = src %in% colnames(vep)
+  if (any(!present)) print(paste0("There is no ", paste(fields[!present], collapse = ", "), " information of the sample ", sample))
+  for (k in which(present)) df[[paste0(sample, "_", fields[k])]] = vep[[src[k]]]
+  df
+}
+
+# ROH from AutoMap (the same file is used for all the samples)
+roh = rep("NaN", nrow(df_out))
+if (!is.null(automap_path) && file.exists(automap_path)) {
+  automap_lines = readLines(automap_path)
+  automap_lines = automap_lines[!startsWith(automap_lines, "#") & nzchar(automap_lines)]
+  roh = rep("False", nrow(df_out))
+  if (length(automap_lines) > 0) {
+    automap = read.delim(text = automap_lines, header = F, stringsAsFactors = F)
+    chrom = sub("^chr", "", df_out$CHROM)
+    for (i in seq_len(nrow(automap))) {
+      roh[which(chrom == sub("^chr", "", automap$V1[i]) & df_out$POS >= automap$V2[i] & df_out$POS <= automap$V3[i])] = "True"
     }
-  )
+  }
+} else {
+  print("There is no AutoMap information")
+}
+
+for (sample in samples) {
+  df_out = copy_sample_fields(df_out, sample, c("GT", "VAF", "AD", "DP", "SF", "GD", "GQ", "FT"))
+  df_out[[paste0(sample, "_ROH")]] = roh
 }
 
 df_out$hiConfDeNovo = vep$SAMPLE_hiConfDeNovo
 df_out$loConfDeNovo = vep$SAMPLE_loConfDeNovo
 
 
+
 #==============================================#
 #Extra sample information (individual callers) #
 #==============================================#
 
-# Extract column names that match SAMPLE_* pattern
-sample_columns <- grep("^SAMPLE_*", colnames(vep), value = TRUE)
-program_suffixes <- gsub("SAMPLE_", "", sample_columns)
-
+# Fields SAMPLE_{sample}_{program}_{field} of each sample (the ones with "_" after the sample name)
 for (sample in samples) {
-  program_suffixes <-  gsub(paste0(sample, "_"), "", program_suffixes)
-}
-# Extract the {program}_{suffix} part only if it exists after {samplename}
-program_suffixes <- program_suffixes[program_suffixes != "variant_id" & program_suffixes != "Original_pos"]
-program_suffixes_field <- grep("_", program_suffixes, value = TRUE)
-
-for (sample in samples){
-  for (program_field in program_suffixes_field){
-    tryCatch(
-      {
-        print(paste0(sample, "_", program_field))
-        df_out[,paste0(sample, "_", program_field)] = vep[,paste0("SAMPLE_", sample, "_", program_field)]
-      },
-      error=function(e) print(paste0("There is no ", program_field, " information of the sample ", sample)),
-      warning=function(e) print(paste0("There is no ", program_field, " information of the sample ", sample))
-    )
+  prefix = paste0("SAMPLE_", sample, "_")
+  sample_columns = colnames(vep)[startsWith(colnames(vep), prefix)]
+  # Exclude the columns of other samples whose name starts with this sample name (e.g. S1 and S1_father)
+  for (other in setdiff(samples, sample)) {
+    sample_columns = sample_columns[!startsWith(sample_columns, paste0("SAMPLE_", other, "_"))]
   }
-} 
-
-df_out$Original_pos = vep$SAMPLE_Original_pos
-df_out$variant_id = vep$SAMPLE_variant_id
+  program_fields = substring(sample_columns, nchar(prefix) + 1)
+  program_fields = program_fields[grepl("_", program_fields, fixed = TRUE)]
+  df_out = copy_sample_fields(df_out, sample, program_fields)
+}
 
 
 # #======== #
 # # Sorting #
 # #======== #
 
-## Sort the output
+## Sort the output (chromosomes in natural order: 1, 2, ..., 22, X, Y, M)
+chrom_key = sub("^chr", "", df_out$CHROM)
+chrom_num = suppressWarnings(as.numeric(chrom_key))
+chrom_num[chrom_key == "X"] = 23
+chrom_num[chrom_key == "Y"] = 24
+chrom_num[chrom_key %in% c("M", "MT")] = 25
+
 if (!is.null(glowgenes_path)){
-  df_out = df_out[order(df_out$GLOWgenes, df_out$POS),]
+  df_out = df_out[order(df_out$GLOWgenes, chrom_num, chrom_key, df_out$POS),]
 } else {
-  df_out = df_out[order(df_out$CHROM, df_out$POS),]
+  df_out = df_out[order(chrom_num, chrom_key, df_out$POS),]
 }
 
 
