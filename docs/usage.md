@@ -51,7 +51,7 @@ AshkenazimTrio,HG004,"ftp://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/dat
 
 | Column    | Description                                                                                                                                                                            |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trio`    | Custom family name. This entry will be identical for samples from the same family. Spaces in sample names are automatically converted to underscores (`_`).                            |
+| `family`    | Custom family name. This entry will be identical for samples from the same family. Spaces in sample names are automatically converted to underscores (`_`).                            |
 | `sample`  | Custom sample name. This entry will be identical for multiple sequencing libraries/runs from the same sample. Spaces in sample names are automatically converted to underscores (`_`). |
 | `fastq_1` | Full path to FastQ file for Illumina short reads 1. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
 | `fastq_2` | Full path to FastQ file for Illumina short reads 2. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
