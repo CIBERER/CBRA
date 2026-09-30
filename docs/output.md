@@ -19,7 +19,6 @@ The pipeline is built using [Nextflow](https://www.nextflow.io/) and processes d
   - Alternatively, trio analysis can be performed with `GATK4 Haplotypecaller` adding the family ped files. 
 - [Merge and Integration](#Merge-and-Integration) - Merge and integrate the variants from the vcfs obtained with the different tools
 - [Annotation](#Annotation) - Annotate the variants with [Ensembl VEP](https://www.ensembl.org/info/docs/tools/vep/index.html) and add regions of homozygosity (ROHs) with [AUTOMAP](https://github.com/mquinodo/AutoMap) and other custom information. 
-- [Structural Variants](#Structural-Variants) - Detect WGS structural variants with Manta and Delly
 - [MultiQC](#multiqc) - Aggregate report describing results and QC from the whole pipeline
 - [Pipeline information](#pipeline-information) - Report metrics generated during the workflow execution
 
@@ -102,28 +101,6 @@ Vcf files are merged with [bcftools merge](https://samtools.github.io/bcftools/b
 The variants are annotated with [Ensembl VEP](https://www.ensembl.org/info/docs/tools/vep/index.html) using the flag `--everything`, which includes the following options: `--sift b, --polyphen b, --ccds, --hgvs, --symbol, --numbers, --domains, --regulatory, --canonical, --protein, --biotype, --af, --af_1kg, --af_esp, --af_gnomade, --af_gnomadg, --max_af, --pubmed, --uniprot, --mane, --tsl, --appris, --variant_class, --gene_phenotype, --mirna`. See [this page](https://www.ensembl.org/info/docs/tools/vep/script/vep_options.html) for more information. `--custom` flag is used to include INFO field of the vcf file in the final annotated tsv file. 
 
 [POSTVEP](../modules/local/postvep/main.nf) step takes the VEP tab delimited output, filter variants by minor allele frequency (`--maf`) and add other custom annotations, as regions of homozygosity (ROHs) detected with [AUTOMAP](https://github.com/mquinodo/AutoMap) and [GLOWgenes](https://www.translationalbioinformaticslab.es/tblab-home-page/tools/glowgenes), a network-based algorithm developed to prioritize novel candidate genes associated with rare diseases.
-
-
-### Structural Variants
-
-<details markdown="1">
-<summary>Output files</summary>
-
-- `manta/`
-  - `*.vcf.gz`: raw Manta SV VCF files.
-  - `*.vcf.gz.tbi`: raw Manta SV VCF index files.
-- `delly/`
-  - `*.delly.vcf.gz`: raw Delly SV VCF files.
-  - `*.delly.vcf.gz.tbi`: raw Delly SV VCF index files.
-- `svs/annotsv_annotation/`
-  - `*.tsv`: AnnotSV annotation tables generated from Manta SV calls.
-- `svs/delly_annotsv_annotation/`
-  - `*.tsv`: AnnotSV annotation tables generated from Delly SV calls.
-  - `*.vcf`: optional AnnotSV VCF output generated from Delly SV calls.
-
-</details>
-
-For WGS, `--svs true --ngs_type wgs` runs all available SV callers together. Currently this is only Manta and Delly. Delly results are emitted as raw VCF files, indexed with BCFtools, and annotated independently with AnnotSV. Delly and Manta calls are not merged in this workflow.
 
 
 ### CNVs
