@@ -3,9 +3,10 @@
 work/
 manual_outputs/
 project_docs/
-AGENTS*
+
 *.sif
 *.def
 
 .nextflow.log*
-null/pipeline_info/execution*
+
+null/pipeline_info
