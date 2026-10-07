@@ -1,0 +1,32 @@
+functional_requirements:
+  - id: <requirement-id>
+    operation: <required behavior>
+    method: <required tool/method or null>
+    inputs:
+      - <input semantics / format>
+    outputs:
+      - <output semantics / format>
+
+resolutions:
+  - covers:
+      - <requirement-id>
+    resolution: <reuse-local | import-nf-core | composition | new-required>
+
+    # For reuse-local:
+    path: <repository path>
+
+    # For import-nf-core:
+    component_type: <module | subworkflow>
+    component: <exact nf-core component name>
+
+    # For composition:
+    components:
+      - resolution: <reuse-local | import-nf-core>
+        component: <path or nf-core component name>
+
+    evidence:
+      - <why this satisfies or fails to satisfy the functional contract>
+
+nfcore:
+  checked: <true | false>
+  modules_sha: <commit SHA or null>
