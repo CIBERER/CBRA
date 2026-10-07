@@ -43,7 +43,6 @@ Revisions update those files in place instead of creating parallel artifacts.
 | `$coding-spec` | Apply repository and language coding conventions. |
 | `$linting` | Run repository lint checks and fix requested findings. |
 | `$testing-unit` | Write and run isolated tests. |
-| `$testing-e2e` | Test complete public-interface flows. |
 | `$documenting-code` | Document source APIs and generate documentation artifacts. |
 | `$start-task` | Prepare a local task branch. |
 | `$commit-changes` | Create reviewed local commits. |
