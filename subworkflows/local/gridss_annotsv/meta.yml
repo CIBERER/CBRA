@@ -1,0 +1,43 @@
+name: gridss_annotsv
+description: Call structural variants from one WGS BAM with GRIDSS, index and audit the calls, and annotate them with AnnotSV.
+keywords:
+  - structural variants
+  - gridss
+  - annotsv
+  - wgs
+components:
+  - gridss/gridss
+  - tabix/tabix
+  - bcftools/stats
+  - annotsv/annotsv
+  - custom/dumpsoftwareversions
+
+input:
+  - ch_bam:
+      description: 'Structure: [ val(meta), path(bam), path(bai) ]; one coordinate-sorted paired-end WGS sample and its index.'
+  - ch_fasta:
+      description: 'Structure: [ val(reference_meta), path(fasta) ]; reference FASTA.'
+  - ch_fai:
+      description: 'Structure: [ val(reference_meta), path(fai) ]; reference FASTA index.'
+  - ch_bwa_index:
+      description: 'Structure: [ val(reference_meta), path(bwa_index_dir) ]; BWA index directory, or an empty path list.'
+  - ch_annotsv_annotations:
+      description: 'Structure: [ val(annotations_meta), path(annotations_parent_dir) ]; directory containing Annotations_Human.'
+
+output:
+  - gridss_vcf:
+      description: 'Structure: [ val(meta), path(vcf.gz) ]; GRIDSS calls.'
+  - gridss_tbi:
+      description: 'Structure: [ val(meta), path(tbi) ]; Tabix index of GRIDSS calls.'
+  - bcftools_stats:
+      description: 'Structure: [ val(meta), path(stats.txt) ]; BCFtools call-set statistics.'
+  - annotsv_vcf:
+      description: 'Structure: [ val(meta), path(vcf) ]; AnnotSV VCF.'
+  - annotsv_tsv:
+      description: 'Structure: [ val(meta), path(tsv) ]; AnnotSV TSV.'
+  - annotsv_unannotated_tsv:
+      description: 'Structure: [ val(meta), path(unannotated_tsv) ]; unannotated AnnotSV TSV.'
+  - versions:
+      description: 'Structure: path(software_versions.yml); consolidated tool versions.'
+  - versions_mqc:
+      description: 'Structure: path(software_versions_mqc.yml); MultiQC version table.'
