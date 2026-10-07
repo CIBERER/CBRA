@@ -8,7 +8,6 @@ keywords:
 components:
   - gridss/gridss
   - tabix/tabix
-  - bcftools/stats
   - annotsv/annotsv
   - custom/dumpsoftwareversions
 
@@ -29,8 +28,6 @@ output:
       description: 'Structure: [ val(meta), path(vcf.gz) ]; GRIDSS calls.'
   - gridss_tbi:
       description: 'Structure: [ val(meta), path(tbi) ]; Tabix index of GRIDSS calls.'
-  - bcftools_stats:
-      description: 'Structure: [ val(meta), path(stats.txt) ]; BCFtools call-set statistics.'
   - annotsv_vcf:
       description: 'Structure: [ val(meta), path(vcf) ]; AnnotSV VCF.'
   - annotsv_tsv:
