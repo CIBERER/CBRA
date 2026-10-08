@@ -51,7 +51,7 @@ AshkenazimTrio,HG004,"ftp://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/dat
 
 | Column    | Description                                                                                                                                                                            |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trio`    | Custom family name. This entry will be identical for samples from the same family. Spaces in sample names are automatically converted to underscores (`_`).                            |
+| `family`    | Custom family name. This entry will be identical for samples from the same family. Spaces in sample names are automatically converted to underscores (`_`).                            |
 | `sample`  | Custom sample name. This entry will be identical for multiple sequencing libraries/runs from the same sample. Spaces in sample names are automatically converted to underscores (`_`). |
 | `fastq_1` | Full path to FastQ file for Illumina short reads 1. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
 | `fastq_2` | Full path to FastQ file for Illumina short reads 2. File has to be gzipped and have the extension ".fastq.gz" or ".fq.gz".                                                             |
@@ -110,13 +110,13 @@ You can also generate such `YAML`/`JSON` files via [nf-core/launch](https://nf-c
 ### Pipeline steps
 
 
-The pipeline can perform different steps: `--mapping`, `--variant_calling`, `--annotation` and `--cnvs`. These steps can be set to true or false depending on the input and the desired output. For example, to start from the fastq files and perform only mapping and variant calling, set `--mapping true` and `--variant_calling true` and include a samplesheet that contain the path to the fastq files.
+The pipeline can perform different steps: `--mapping`, `--variant_calling`, `--annotation` and `--cnvs`. These steps can be set to true or false depending on the input and the desired output. For example, to start from the fastq files and perform only mapping and variant calling, set `--mapping true` and `--variant_calling true` and include a samplesheet that contain the path to the fastq files. 
 
 Within SNVs variant calling (`--variant_calling true`), there are three variant callers available for singleton samples (GATK4 Haplotypecaller, Dragen and DeepVariant) and one different workflow for trio samples using GATK4 Haplotypecaller. The three variant callers for singleton are additive and can be included in the analysis using `--run_gatk true`, `--run_dragen true` and `--run_deepvariant true`. For trio analysis, set `--trio_analysis true` and provide the interval_list file needed for the `GATK4_GENOMICSDBIMPORT` module with `--genomicsdbimport_interval`. To ensure that SNVs are detected only in the target region, set `--targeted_snvs_detection true` and the path to the bed file with `--intervals`. 
 
 For SVs calling (`--svs true`), there are two subworkflows available, depending on the sequencing type (`--ngs_type`): 
   1. If `--ngs_type wes`, there are three programs available (ExomeDepth, panelcn.MOPS, CoNVaDING). They can be included in the analysis independently with `exomedepth = true`, `panelcmops = true` and `convading = true`. The results from the software used will be merged into a single file, which will be annotated using AnnotSV. It is required to include a BED file containing the sequenced region in the WES (`--intervals`).
-  2. If `--ngs_type wgs`, all available WGS SV callers are run together. Currently, this means Manta and Delly. Manta and Delly results will be annotated using AnnotSV. Manta will analyse each sample separately by default. For joint analysis of small sets of individuals set `manta_joint = true`. Delly will run per sample and emit raw VCF files with a TBI index. More information about Manta can be found [here](https://github.com/Illumina/manta/blob/master/docs/userGuide/README.md).
+  2. If `--ngs_type wgs`, Manta will be run and the result will be annotated using AnnotSV. Manta will analyse each sample separately by default. For joint analysis of small sets of individuals set `manta_joint = true`. More information [here](https://github.com/Illumina/manta/blob/master/docs/userGuide/README.md).
 
 ### Updating the pipeline
 
