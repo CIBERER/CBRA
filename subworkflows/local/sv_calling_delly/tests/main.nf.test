@@ -1,0 +1,58 @@
+nextflow_workflow {
+
+    name "Test Subworkflow SV_CALLING_DELLY"
+    script "../main.nf"
+    workflow "SV_CALLING_DELLY"
+
+    tag "subworkflows"
+    tag "subworkflows/sv_calling_delly"
+    tag "delly"
+    tag "delly/call"
+    tag "bcftools"
+    tag "bcftools/index"
+    tag "annotsv"
+    tag "annotsv/annotsv"
+
+    test("sv_calling_delly - bam - raw vcf and annotsv - stub") {
+
+        config "./nextflow.config"
+        options "-stub"
+
+        when {
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id:'test' ],
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/illumina/bam/test2.paired_end.recalibrated.sorted.bam', checkIfExists:true),
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/illumina/bam/test2.paired_end.recalibrated.sorted.bam.bai', checkIfExists:true)
+                ])
+                input[1] = Channel.of([
+                    [ id:'genome' ],
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/genome/chr21/sequence/genome.fasta', checkIfExists:true)
+                ])
+                input[2] = Channel.of([
+                    [ id:'genome' ],
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/genome/chr21/sequence/genome.fasta.fai', checkIfExists:true)
+                ])
+                input[3] = Channel.of([[ id:'annotations' ], []])
+                input[4] = Channel.of([[:], []])
+                input[5] = Channel.of([[:], []])
+                input[6] = Channel.of([[:], []])
+                """
+            }
+        }
+
+        then {
+            assertAll(
+                { assert workflow.success },
+                { assert workflow.out.vcf },
+                { assert workflow.out.vcf_index },
+                { assert workflow.out.annotated_tsv },
+                { assert workflow.out.annotated_vcf },
+                { assert workflow.out.unannotated_tsv },
+                { assert workflow.out.versions },
+                { assert snapshot(sanitizeOutput(workflow.out)).match() }
+            )
+        }
+    }
+}

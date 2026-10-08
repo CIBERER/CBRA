@@ -22,6 +22,11 @@
             "git_sha": "05954dab2ff481bcb999f24455da29a5828af08d",
             "installed_by": ["modules"]
           },
+          "bcftools/index": {
+            "branch": "master",
+            "git_sha": "feef37435aea56816adf4b3bde1fc76aac327a8d",
+            "installed_by": ["modules"]
+          },
           "bcftools/merge": {
             "branch": "master",
             "git_sha": "c9c3ef86c1892413b3c86fb38c4e39fd7288512f",
@@ -71,6 +76,11 @@
             "branch": "master",
             "git_sha": "05954dab2ff481bcb999f24455da29a5828af08d",
             "installed_by": ["deepvariant"]
+          },
+          "delly/call": {
+            "branch": "master",
+            "git_sha": "6d46786420b4d7bc88eba026eb389c0c5535d120",
+            "installed_by": ["modules"]
           },
           "ensemblvep/download": {
             "branch": "master",

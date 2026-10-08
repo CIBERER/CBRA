@@ -1,0 +1,58 @@
+{
+    "sv_calling_delly - bam - raw vcf and annotsv - stub": {
+        "content": [
+            {
+                "annotated_tsv": [
+                    [
+                        {
+                            "id": "test"
+                        },
+                        "test.delly.tsv:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "annotated_vcf": [
+                    [
+                        {
+                            "id": "test"
+                        },
+                        "test.delly.vcf:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "unannotated_tsv": [
+                    [
+                        {
+                            "id": "test"
+                        },
+                        "test.delly.unannotated.tsv:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "vcf": [
+                    [
+                        {
+                            "id": "test"
+                        },
+                        "test.delly.vcf.gz:md5,68b329da9893e34099c7d8ad5cb9c940"
+                    ]
+                ],
+                "vcf_index": [
+                    [
+                        {
+                            "id": "test"
+                        },
+                        "test.delly.vcf.gz.tbi:md5,d41d8cd98f00b204e9800998ecf8427e"
+                    ]
+                ],
+                "versions": [
+                    "bcftools_index_versions.yml:md5,67f215b1f2d614ad6f55af4457b88ff1",
+                    "delly_versions.yml:md5,eda0f6ad70bce36ba9b504349e18e6e8",
+                    "versions.yml:md5,b2d1127ba85dbc7abc7f19f244b0e77b"
+                ]
+            }
+        ],
+        "timestamp": "2026-09-23T16:14:22.591904404",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "25.04.6"
+        }
+    }
+}
