@@ -4,9 +4,6 @@ work/
 manual_outputs/
 project_docs/
 
-*.sif
-*.def
-
 .nextflow.log*
 
 null/pipeline_info
