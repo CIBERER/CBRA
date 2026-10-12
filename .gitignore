@@ -1,3 +1,5 @@
 .nf-test*
 .nextflow/
 work/
+.codex-cluster/jobid
+agents_data/reference-data/

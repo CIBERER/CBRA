@@ -1,0 +1,41 @@
+{
+  "chat.agentFilesLocations": {
+    ".agents/agents": true
+  },
+  "chat.agentSkillsLocations": {
+    ".agents/skills": true,
+  },
+  "chat.promptFilesLocations": {
+    ".agents/prompts": true
+  },
+  "chat.useAgentsMdFile": true,
+  "material-icon-theme.files.associations": {
+    "AGENTS.md": "contributing",
+    "*.briefing.md": "apiblueprint",
+    "*.plan.md": "todo",
+    "*.spec.md": "conduct",
+    "*.template.md": "template",
+    "ADD.md": "architecture",
+    "briefing.md": "apiblueprint",
+    "ERM.md": "architecture",
+    "PRD.md": "architecture",
+    "SKILL.md": "slint",
+  },
+  "material-icon-theme.folders.associations": {
+    ".agents": "robot",
+    "agents": "robot",
+    "prompts": "prompts",
+    "skills": "prompts",
+  },
+  "workbench.preferredDarkColorTheme": "Dark Modern",
+  "workbench.preferredLightColorTheme": "Dark Modern",
+  "window.zoomLevel": 1,
+  "chat.tools.terminal.autoApprove": {
+    "git tag": true,
+    "git add": true,
+    "git commit": true,
+    "go": true,
+    "gofmt": true,
+    "q": true
+  }
+}
