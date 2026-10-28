@@ -32,6 +32,140 @@ nextflow_pipeline {
     }
     // Every SV output location, current (Step 3) and target (Step 4).
     def svOutputDirs = [ 'SVs', 'svs', 'manta', 'delly', 'gridss' ]
+    // Pre-Step 4 SV output locations that the SVs/{method}/ layout replaces.
+    def oldSvOutputDirs = [ 'svs', 'manta', 'delly', 'gridss' ]
+
+    // Expected SVs/{method}/ contents for the samplesheet's single sample (meta.id 'Sample1'),
+    // derived from the module stub blocks and the per-method ext.prefix values kept by the plan:
+    // MANTA_GERMLINE writes six <id>.{candidate_small_indels,candidate_sv,diploid_sv}.vcf.gz(.tbi);
+    // DELLY_CALL/BCFTOOLS_INDEX use prefix <id>.delly; GRIDSS_GRIDSS/TABIX_TABIX use the default
+    // prefix <id>; ANNOTSV_ANNOTSV writes <prefix>.tsv and <prefix>.unannotated.tsv (plus <prefix>.vcf
+    // only with '-vcf 1'). Optional names are tolerated but not required: the AnnotSV unannotated TSV
+    // and VCF, the TABIX stub's extra .csi, and per-process versions.yml files.
+    def expectedSvFiles = [
+        manta : [
+            required: [ 'Sample1.candidate_small_indels.vcf.gz', 'Sample1.candidate_small_indels.vcf.gz.tbi',
+                        'Sample1.candidate_sv.vcf.gz', 'Sample1.candidate_sv.vcf.gz.tbi',
+                        'Sample1.diploid_sv.vcf.gz', 'Sample1.diploid_sv.vcf.gz.tbi',
+                        'Sample1.tsv' ],
+            optional: [ 'Sample1.unannotated.tsv', 'versions.yml' ]
+        ],
+        delly : [
+            required: [ 'Sample1.delly.vcf.gz', 'Sample1.delly.vcf.gz.tbi', 'Sample1.delly.tsv' ],
+            optional: [ 'Sample1.delly.unannotated.tsv', 'versions.yml' ]
+        ],
+        gridss: [
+            required: [ 'Sample1.vcf.gz', 'Sample1.vcf.gz.tbi', 'Sample1.tsv' ],
+            optional: [ 'Sample1.unannotated.tsv', 'Sample1.vcf', 'Sample1.vcf.gz.csi', 'versions.yml' ]
+        ]
+    ]
+    // Method subdirectories present under ${outdir}/SVs (empty list when SVs/ is absent).
+    def svMethodDirs = { outdir -> (new File("${outdir}/SVs").list() ?: []).toList().sort() }
+    // Problems in ${outdir}/SVs/<method>/: missing required files and entries not expected for that method.
+    def svDirProblems = { outdir, String method ->
+        def dir = new File("${outdir}/SVs/${method}")
+        if (!dir.isDirectory()) { return [ "missing directory SVs/${method}/" ] }
+        def present = dir.list().toList().sort()
+        def expected = expectedSvFiles[method]
+        def missing = expected.required.findAll { !(it in present) }.collect { "missing SVs/${method}/${it}" }
+        def unexpected = present.findAll { !(it in expected.required) && !(it in expected.optional) }.collect { "unexpected SVs/${method}/${it}" }
+        missing + unexpected
+    }
+    // SV result files (VCF, index, TSV) published anywhere under ${outdir} except SVs/.
+    def svFilesOutsideSvs = { outdir ->
+        def root = new File("${outdir}")
+        def found = []
+        if (root.isDirectory()) {
+            root.eachFileRecurse { f ->
+                def rel = root.toPath().relativize(f.toPath()).toString()
+                if (!rel.startsWith('SVs/') && f.name ==~ /.*\.(vcf|vcf\.gz|tbi|csi|tsv)$/) { found << rel }
+            }
+        }
+        found.sort()
+    }
+
+    // Rows of the run's trace (meta/trace.csv) as maps keyed by the header (name, hash, ...).
+    def traceRows = { runDir ->
+        def f = new File("${runDir}/meta/trace.csv")
+        if (!f.exists()) { return [] }
+        def lines = f.readLines().findAll { it.trim() }
+        def header = lines[0].split('\t', -1).toList()
+        lines.drop(1).collect { line -> [ header, line.split('\t', -1).toList() ].transpose().collectEntries() }
+    }
+    // Work directory of a trace row (hash 'ab/cdef12' -> ${runDir}/work/ab/cdef12...).
+    def workDirOf = { runDir, row ->
+        def parts = row.hash.toString().tokenize('/')
+        new File("${runDir}/work/${parts[0]}").listFiles()?.find { it.name.startsWith(parts[1]) }
+    }
+    // A file inside a trace row's work directory (null when the work directory is not found).
+    def workFile = { runDir, row, String name ->
+        def dir = workDirOf(runDir, row)
+        dir ? new File(dir, name) : null
+    }
+    def rowsEndingWith = { rows, String suffix -> rows.findAll { it.name.toString().tokenize(' ')[0].endsWith(suffix) } }
+
+    // Minimal reader for the two-level software_versions.yml written by CUSTOM_DUMPSOFTWAREVERSIONS
+    // (yaml.dump block style: 'MODULE:' then '  tool: version'). Returns [ module: [ tool: version ] ].
+    def readVersions = { File f ->
+        def versions = [:]
+        def current = null
+        f.readLines().findAll { it.trim() }.each { line ->
+            if (!line.startsWith(' ')) {
+                current = line.trim().replaceAll(/:$/, '').replaceAll(/^['"]|['"]$/, '')
+                versions[current] = [:]
+            } else if (current != null) {
+                def kv = line.trim().split(':', 2)
+                versions[current][kv[0].trim().replaceAll(/^['"]|['"]$/, '')] = kv.size() > 1 ? kv[1].trim() : ''
+            }
+        }
+        versions
+    }
+    def publishedVersionsFile = { outdir -> new File("${outdir}/pipeline_info/software_versions.yml") }
+    // Module -> tool pairs each SV method (and the derived BWA index) contributes to the versions report.
+    def svVersionModules = [
+        manta : [ MANTA_GERMLINE: 'manta' ],
+        delly : [ DELLY_CALL: 'delly', BCFTOOLS_INDEX: 'bcftools' ],
+        gridss: [ GRIDSS_GRIDSS: 'gridss', TABIX_TABIX: 'tabix' ],
+        bwa   : [ BWA_INDEX: 'bwa' ]
+    ]
+    // Problems in pipeline_info/software_versions.yml for the selected methods. 'bwa' is listed in
+    // selected when the BWA index is derived from --fasta. AnnotSV is required whenever a method runs.
+    def versionProblems = { outdir, List selected ->
+        def f = publishedVersionsFile(outdir)
+        if (!f.exists()) { return [ 'missing pipeline_info/software_versions.yml' ] }
+        def versions = readVersions(f)
+        def problems = []
+        def required = [ ANNOTSV_ANNOTSV: 'annotsv' ]
+        selected.each { required += svVersionModules[it] }
+        required.each { module, tool ->
+            if (!versions[module]?.containsKey(tool)) { problems << "missing ${module}.${tool}" }
+        }
+        svVersionModules.findAll { !(it.key in selected) }.each { method, modules ->
+            modules.keySet().findAll { versions.containsKey(it) }.each { problems << "unselected ${method} module ${it} listed" }
+        }
+        problems
+    }
+    // The published pipeline_info/software_versions.yml must be the pipeline-level dump's output
+    // (the SNVS-level CUSTOM_DUMPSOFTWAREVERSIONS task), not the GRIDSS-internal dump's.
+    def pipelineDumpProblems = { outdir, runDir ->
+        def dumps = rowsEndingWith(traceRows(runDir), ':CUSTOM_DUMPSOFTWAREVERSIONS').findAll { !it.name.toString().contains('_ANNOTSV:') }
+        if (dumps.size() != 1) { return [ "expected one pipeline-level CUSTOM_DUMPSOFTWAREVERSIONS task, found ${dumps*.name}" ] }
+        def produced = workFile(runDir, dumps[0], 'software_versions.yml')
+        def published = publishedVersionsFile(outdir)
+        if (!produced?.exists() || !published.exists()) { return [ "software_versions.yml missing (task: ${produced?.exists()}, published: ${published.exists()})" ] }
+        produced.text == published.text ? [] : [ 'pipeline_info/software_versions.yml differs from the pipeline-level dump output' ]
+    }
+    // The input staged into the GRIDSS task as its BWA index, resolved to its real location.
+    def gridssStagedIndex = { runDir, String stagedName ->
+        def rows = rowsEndingWith(traceRows(runDir), ':GRIDSS_ANNOTSV:GRIDSS_GRIDSS')
+        if (rows.size() != 1) { return null }
+        def staged = workFile(runDir, rows[0], stagedName)
+        staged?.exists() ? staged.canonicalPath : null
+    }
+    // Stand-in BWA index for the --index case: a tracked repository directory. GRIDSS_GRIDSS's stub
+    // never reads it (it only writes <id>.vcf.gz), and its distinct name 'conf' makes the staged input
+    // identifiable in the GRIDSS work directory (unlike tests/config, which is the AnnotSV stand-in).
+    def bwaIndexStandIn = 'conf'
 
     test("sv_tools = 'manta' - only MANTA_ANNOTSV runs") {
 
@@ -60,7 +194,11 @@ nextflow_pipeline {
                 { assert svTasks(names, 'MANTA').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one Manta AnnotSV run for Sample1: ${names}" },
                 { assert svTasks(names, 'DELLY').isEmpty() : "no Delly task expected: ${svTasks(names, 'DELLY')}" },
                 { assert svTasks(names, 'GRIDSS').isEmpty() : "no GRIDSS task expected: ${svTasks(names, 'GRIDSS')}" },
-                { assert !names.any { it.endsWith(':BWA_INDEX') } : "no BWA index without GRIDSS or mapping: ${names}" }
+                { assert !names.any { it.endsWith(':BWA_INDEX') } : "no BWA index without GRIDSS or mapping: ${names}" },
+                { assert svMethodDirs(outputDir) == [ 'manta' ] : "only SVs/manta/ expected under SVs/: ${svMethodDirs(outputDir)}" },
+                { assert svDirProblems(outputDir, 'manta').isEmpty() : "SVs/manta/ contents: ${svDirProblems(outputDir, 'manta')}" },
+                { assert oldSvOutputDirs.every { !new File("$outputDir/$it").exists() } : "old SV output locations must be absent: ${oldSvOutputDirs.findAll { new File("$outputDir/$it").exists() }}" },
+                { assert svFilesOutsideSvs(outputDir).isEmpty() : "SV files published outside SVs/: ${svFilesOutsideSvs(outputDir)}" }
             )
         }
     }
@@ -92,7 +230,11 @@ nextflow_pipeline {
                 { assert svTasks(names, 'DELLY').count { it.endsWith(':BCFTOOLS_INDEX') } == 1 : "one Delly index for Sample1: ${names}" },
                 { assert svTasks(names, 'DELLY').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one Delly AnnotSV run for Sample1: ${names}" },
                 { assert svTasks(names, 'MANTA').isEmpty() : "no Manta task expected: ${svTasks(names, 'MANTA')}" },
-                { assert svTasks(names, 'GRIDSS').isEmpty() : "no GRIDSS task expected: ${svTasks(names, 'GRIDSS')}" }
+                { assert svTasks(names, 'GRIDSS').isEmpty() : "no GRIDSS task expected: ${svTasks(names, 'GRIDSS')}" },
+                { assert svMethodDirs(outputDir) == [ 'delly' ] : "only SVs/delly/ expected under SVs/: ${svMethodDirs(outputDir)}" },
+                { assert svDirProblems(outputDir, 'delly').isEmpty() : "SVs/delly/ contents: ${svDirProblems(outputDir, 'delly')}" },
+                { assert oldSvOutputDirs.every { !new File("$outputDir/$it").exists() } : "old SV output locations must be absent: ${oldSvOutputDirs.findAll { new File("$outputDir/$it").exists() }}" },
+                { assert svFilesOutsideSvs(outputDir).isEmpty() : "SV files published outside SVs/: ${svFilesOutsideSvs(outputDir)}" }
             )
         }
     }
@@ -276,6 +418,168 @@ nextflow_pipeline {
                 { assert anySvTasks(names).isEmpty() : "no SV task expected: ${anySvTasks(names)}" },
                 { assert !allOutput(workflow, "$launchDir").contains('No SV tools have been selected') : "no empty-selection warning with --svs false" },
                 { assert svOutputDirs.every { !new File("$outputDir/$it").exists() } : "no SV output directory expected" }
+            )
+        }
+    }
+
+    test("sv_tools = 'gridss' without index - BWA index derived once from fasta, only GRIDSS_ANNOTSV runs") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'gridss'
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            def rows = traceRows("$launchDir")
+            def bwaRows = rowsEndingWith(rows, ':BWA_INDEX')
+            def bwaOutput = bwaRows.size() == 1 ? workFile("$launchDir", bwaRows[0], 'bwa')?.canonicalPath : null
+            assertAll(
+                { assert workflow.success },
+                { assert names.count { it.endsWith(':BWA_INDEX') } == 1 : "BWA_INDEX runs exactly once: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':GRIDSS_GRIDSS') } == 1 : "one GRIDSS call for Sample1: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':TABIX_TABIX') } == 1 : "one GRIDSS Tabix run for Sample1: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one GRIDSS AnnotSV run for Sample1: ${names}" },
+                { assert bwaOutput != null && gridssStagedIndex("$launchDir", 'bwa') == bwaOutput : "GRIDSS stages the BWA_INDEX output 'bwa' (${bwaOutput}) as its index: ${gridssStagedIndex("$launchDir", 'bwa')}" },
+                { assert svTasks(names, 'MANTA').isEmpty() : "no Manta task expected: ${svTasks(names, 'MANTA')}" },
+                { assert svTasks(names, 'DELLY').isEmpty() : "no Delly task expected: ${svTasks(names, 'DELLY')}" },
+                { assert svMethodDirs(outputDir) == [ 'gridss' ] : "only SVs/gridss/ expected under SVs/: ${svMethodDirs(outputDir)}" },
+                { assert svDirProblems(outputDir, 'gridss').isEmpty() : "SVs/gridss/ contents: ${svDirProblems(outputDir, 'gridss')}" },
+                { assert oldSvOutputDirs.every { !new File("$outputDir/$it").exists() } : "old SV output locations must be absent: ${oldSvOutputDirs.findAll { new File("$outputDir/$it").exists() }}" },
+                { assert svFilesOutsideSvs(outputDir).isEmpty() : "SV files published outside SVs/: ${svFilesOutsideSvs(outputDir)}" },
+                { assert versionProblems(outputDir, [ 'gridss', 'bwa' ]).isEmpty() : "software_versions.yml: ${versionProblems(outputDir, [ 'gridss', 'bwa' ])}" },
+                { assert pipelineDumpProblems(outputDir, "$launchDir").isEmpty() : "${pipelineDumpProblems(outputDir, "$launchDir")}" }
+            )
+        }
+    }
+
+    test("sv_tools = 'gridss' with index - GRIDSS uses the supplied index, no BWA_INDEX task") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                index               = "${projectDir}/${bwaIndexStandIn}"
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'gridss'
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            def suppliedIndex = new File("${projectDir}/${bwaIndexStandIn}").canonicalPath
+            assertAll(
+                { assert workflow.success },
+                { assert !names.any { it.endsWith(':BWA_INDEX') } : "no BWA_INDEX task with --index: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':GRIDSS_GRIDSS') } == 1 : "one GRIDSS call for Sample1: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one GRIDSS AnnotSV run for Sample1: ${names}" },
+                { assert gridssStagedIndex("$launchDir", bwaIndexStandIn) == suppliedIndex : "GRIDSS stages the --index directory ${suppliedIndex}: ${gridssStagedIndex("$launchDir", bwaIndexStandIn)}" },
+                { assert svTasks(names, 'MANTA').isEmpty() : "no Manta task expected: ${svTasks(names, 'MANTA')}" },
+                { assert svTasks(names, 'DELLY').isEmpty() : "no Delly task expected: ${svTasks(names, 'DELLY')}" },
+                { assert svMethodDirs(outputDir) == [ 'gridss' ] : "only SVs/gridss/ expected under SVs/: ${svMethodDirs(outputDir)}" },
+                { assert svDirProblems(outputDir, 'gridss').isEmpty() : "SVs/gridss/ contents: ${svDirProblems(outputDir, 'gridss')}" },
+                { assert versionProblems(outputDir, [ 'gridss' ]).isEmpty() : "software_versions.yml: ${versionProblems(outputDir, [ 'gridss' ])}" }
+            )
+        }
+    }
+
+    test("sv_tools = 'manta,gridss' - exactly Manta and GRIDSS run once, each published under SVs/{method}/") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'manta,gridss'
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.success },
+                { assert svTasks(names, 'MANTA').count { it.endsWith(':MANTA_GERMLINE') } == 1 : "one Manta call for Sample1: ${names}" },
+                { assert svTasks(names, 'MANTA').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one Manta AnnotSV run for Sample1: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':GRIDSS_GRIDSS') } == 1 : "one GRIDSS call for Sample1: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one GRIDSS AnnotSV run for Sample1: ${names}" },
+                { assert names.count { it.endsWith(':BWA_INDEX') } == 1 : "BWA_INDEX runs exactly once: ${names}" },
+                { assert svTasks(names, 'DELLY').isEmpty() : "no Delly task expected: ${svTasks(names, 'DELLY')}" },
+                { assert svMethodDirs(outputDir) == [ 'gridss', 'manta' ] : "SVs/ holds exactly gridss/ and manta/: ${svMethodDirs(outputDir)}" },
+                { assert svDirProblems(outputDir, 'manta').isEmpty() : "SVs/manta/ contents: ${svDirProblems(outputDir, 'manta')}" },
+                { assert svDirProblems(outputDir, 'gridss').isEmpty() : "SVs/gridss/ contents: ${svDirProblems(outputDir, 'gridss')}" },
+                { assert oldSvOutputDirs.every { !new File("$outputDir/$it").exists() } : "old SV output locations must be absent: ${oldSvOutputDirs.findAll { new File("$outputDir/$it").exists() }}" },
+                { assert svFilesOutsideSvs(outputDir).isEmpty() : "SV files published outside SVs/: ${svFilesOutsideSvs(outputDir)}" },
+                { assert versionProblems(outputDir, [ 'manta', 'gridss', 'bwa' ]).isEmpty() : "software_versions.yml: ${versionProblems(outputDir, [ 'manta', 'gridss', 'bwa' ])}" },
+                { assert pipelineDumpProblems(outputDir, "$launchDir").isEmpty() : "${pipelineDumpProblems(outputDir, "$launchDir")}" }
+            )
+        }
+    }
+
+    test("sv_tools default - Manta, Delly and GRIDSS each run once, each published under SVs/{method}/") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.success },
+                { assert svTasks(names, 'MANTA').count { it.endsWith(':MANTA_GERMLINE') } == 1 : "one Manta call for Sample1: ${names}" },
+                { assert svTasks(names, 'MANTA').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one Manta AnnotSV run for Sample1: ${names}" },
+                { assert svTasks(names, 'DELLY').count { it.endsWith(':DELLY_CALL') } == 1 : "one Delly call for Sample1: ${names}" },
+                { assert svTasks(names, 'DELLY').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one Delly AnnotSV run for Sample1: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':GRIDSS_GRIDSS') } == 1 : "one GRIDSS call for Sample1: ${names}" },
+                { assert svTasks(names, 'GRIDSS').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one GRIDSS AnnotSV run for Sample1: ${names}" },
+                { assert names.count { it.endsWith(':BWA_INDEX') } == 1 : "BWA_INDEX runs exactly once: ${names}" },
+                { assert svMethodDirs(outputDir) == [ 'delly', 'gridss', 'manta' ] : "SVs/ holds exactly delly/, gridss/ and manta/: ${svMethodDirs(outputDir)}" },
+                { assert svDirProblems(outputDir, 'manta').isEmpty() : "SVs/manta/ contents: ${svDirProblems(outputDir, 'manta')}" },
+                { assert svDirProblems(outputDir, 'delly').isEmpty() : "SVs/delly/ contents: ${svDirProblems(outputDir, 'delly')}" },
+                { assert svDirProblems(outputDir, 'gridss').isEmpty() : "SVs/gridss/ contents: ${svDirProblems(outputDir, 'gridss')}" },
+                { assert oldSvOutputDirs.every { !new File("$outputDir/$it").exists() } : "old SV output locations must be absent: ${oldSvOutputDirs.findAll { new File("$outputDir/$it").exists() }}" },
+                { assert svFilesOutsideSvs(outputDir).isEmpty() : "SV files published outside SVs/: ${svFilesOutsideSvs(outputDir)}" },
+                { assert versionProblems(outputDir, [ 'manta', 'delly', 'gridss', 'bwa' ]).isEmpty() : "software_versions.yml: ${versionProblems(outputDir, [ 'manta', 'delly', 'gridss', 'bwa' ])}" },
+                { assert pipelineDumpProblems(outputDir, "$launchDir").isEmpty() : "${pipelineDumpProblems(outputDir, "$launchDir")}" }
             )
         }
     }
