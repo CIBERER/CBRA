@@ -19,6 +19,7 @@ The pipeline is built using [Nextflow](https://www.nextflow.io/) and processes d
   - Alternatively, trio analysis can be performed with `GATK4 Haplotypecaller` adding the family ped files. 
 - [Merge and Integration](#Merge-and-Integration) - Merge and integrate the variants from the vcfs obtained with the different tools
 - [Annotation](#Annotation) - Annotate the variants with [Ensembl VEP](https://www.ensembl.org/info/docs/tools/vep/index.html) and add regions of homozygosity (ROHs) with [AUTOMAP](https://github.com/mquinodo/AutoMap) and other custom information. 
+- [SVs](#SVs) - Detect structural variants in WGS with the selected methods (`Manta`, `Delly` and/or `GRIDSS`) and annotate them with [AnnotSV](https://lbgi.fr/AnnotSV/)
 - [MultiQC](#multiqc) - Aggregate report describing results and QC from the whole pipeline
 - [Pipeline information](#pipeline-information) - Report metrics generated during the workflow execution
 
@@ -119,6 +120,31 @@ The variants are annotated with [Ensembl VEP](https://www.ensembl.org/info/docs/
   
 
 </details>
+
+
+### SVs
+
+<details markdown="1">
+<summary>Output files</summary>
+
+- `SVs/manta/`: if `manta` is selected in `--sv_tools`.
+  - `*.candidate_small_indels.vcf.gz`, `*.candidate_sv.vcf.gz`, `*.diploid_sv.vcf.gz`: raw Manta vcf files.
+  - `*.candidate_small_indels.vcf.gz.tbi`, `*.candidate_sv.vcf.gz.tbi`, `*.diploid_sv.vcf.gz.tbi`: vcf index files.
+  - `*.tsv`: AnnotSV annotated SVs.
+- `SVs/delly/`: if `delly` is selected in `--sv_tools`.
+  - `*.delly.vcf.gz`: raw Delly vcf file.
+  - `*.delly.vcf.gz.tbi`: vcf index file.
+  - `*.delly.tsv`: AnnotSV annotated SVs.
+- `SVs/gridss/`: if `gridss` is selected in `--sv_tools`.
+  - `*.vcf.gz`: raw GRIDSS vcf file.
+  - `*.vcf.gz.tbi`: vcf index file.
+  - `*.tsv`: AnnotSV annotated SVs.
+- `SVs/{method}/versions.yml`: AnnotSV version information, published in each method folder.
+- `AnnotSV_annotations/`: AnnotSV annotation files, downloaded when `--annotsv_annotations` is not specified.
+
+</details>
+
+Structural variants (SVs) are detected in WGS (`--svs true` and `--ngs_type wgs`) with the methods selected in `--sv_tools` ([Manta](https://github.com/Illumina/manta), [Delly](https://github.com/dellytools/delly) and/or [GRIDSS](https://github.com/PapenfussLab/gridss)), and the results of each method are annotated with [AnnotSV](https://lbgi.fr/AnnotSV/). File names start with the sample id. When Manta is run in joint mode (`--manta_joint true`), the Manta files are named after the run name (`--runname`, or the date and time of the run) instead. Each AnnotSV output directory may also contain a `*.unannotated.tsv` file with the SVs that AnnotSV could not annotate, when AnnotSV produces it.
 
 
 ### MultiQC
