@@ -78,6 +78,7 @@ include { VCF_MERGE_VARIANTCALLERS } from '../subworkflows/local/vcf_merge_varia
 include { DEEP_VARIANT_VCF           } from '../subworkflows/local/deep_variant_vcf'
 include { SNV_ANNOTATION } from '../subworkflows/local/snv_annotation'
 include { SV_CALLING } from '../subworkflows/local/sv_calling'
+include { SV_CALLING_DELLY } from '../subworkflows/local/sv_calling_delly'
 include { GATK_TRIO_VCF } from '../subworkflows/local/gatk_trio_vcf'
 include { CNVS_CALLING } from '../subworkflows/local/cnvs_calling'
 
@@ -251,8 +252,8 @@ workflow SNVS {
                 ch_fasta,
                 ch_fai,
                 ch_refdict,
-                ch_snps.map{ it -> [ [id:it.baseName], it ] }.collect(),
-                ch_snps_tbi.map{ it -> [ [id:it.baseName], it ] }.collect(),
+                Channel.fromList([tuple([ id: 'dbsnp'],[])]).collect(),
+                Channel.fromList([tuple([ id: 'dbsnp_tbi'],[])]).collect(),
                 ch_intervals_genomicsdbimport, 
                 ch_ped // ch_ped            
             )
@@ -482,9 +483,9 @@ workflow SNVS {
         } else if (params.ngs_type == 'wgs') {
 
             ch_manta_config = params.manta_config
-                ? Channel.fromPath(params.manta_config, checkIfExists: true)
+                ? Channel.fromPath(params.manta_config, checkIfExists: true).collect()
                 : Channel.empty()
-
+		
             SV_CALLING (
                 ch_bam_svs,
                 ch_fasta,
@@ -496,6 +497,17 @@ workflow SNVS {
                 ch_gene_transcripts
             )
             ch_versions = ch_versions.mix(SV_CALLING.out.versions)
+
+            SV_CALLING_DELLY (
+                ch_bam_svs,
+                ch_fasta,
+                ch_fai,
+                annotations,
+                ch_candidate_genes,
+                ch_false_positive_snv,
+                ch_gene_transcripts
+            )
+            ch_versions = ch_versions.mix(SV_CALLING_DELLY.out.versions)
         }
     }
 

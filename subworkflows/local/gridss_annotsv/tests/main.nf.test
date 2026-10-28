@@ -1,0 +1,142 @@
+nextflow_workflow {
+    name "GRIDSS and AnnotSV one-sample WGS contract"
+    script "../main.nf"
+    config "./nextflow.config"
+    workflow "GRIDSS_ANNOTSV"
+
+    tag "subworkflows"
+    tag "subworkflows_nfcore"
+    tag "subworkflows/gridss_annotsv"
+    tag "gridss_annotsv"
+    tag "gridss"
+    tag "gridss/gridss"
+    tag "tabix"
+    tag "tabix/tabix"
+    tag "annotsv"
+    tag "annotsv/annotsv"
+    tag "custom"
+    tag "custom/dumpsoftwareversions"
+
+    test("homo_sapiens GRCh38 chr22 - paired sorted BAM/BAI sample1 - GRIDSS and AnnotSV outputs") {
+        when {
+            params {
+                modules_testdata_base_path = 'https://raw.githubusercontent.com/nf-core/test-datasets/c16e7bd8bbc7ed534a3652a608ed0b2098037bdd/data/'
+                cbra_test_root = projectDir
+                tabix_args = '-p vcf'
+                annotsv_args = '-vcf 1'
+            }
+            workflow {
+                """
+                def root = params.cbra_test_root
+                def source = params.modules_testdata_base_path + 'genomics/homo_sapiens'
+                input[0] = Channel.of([
+                    [id: 'sample1', single_end: false],
+                    file("\${source}/illumina/bam/test.rna.paired_end.sorted.bam", checkIfExists: true),
+                    file("\${source}/illumina/bam/test.rna.paired_end.sorted.bam.bai", checkIfExists: true)
+                ])
+                input[1] = Channel.of([[id: 'reference'], file("\${source}/genome/genome.fasta", checkIfExists: true)])
+                input[2] = Channel.of([[id: 'reference'], file("\${source}/genome/genome.fasta.fai", checkIfExists: true)])
+                input[3] = Channel.of([[id: 'reference'], []])
+                input[4] = Channel.of([[id: 'annotations'], file("\${root}/agents_data/reference-data", checkIfExists: true)])
+                """
+            }
+        }
+
+        then {
+            def output = workflow.out
+            def sampleNames = ['gridss_vcf', 'gridss_tbi', 'annotsv_vcf',
+                               'annotsv_tsv', 'annotsv_unannotated_tsv']
+            def samplePath = { name ->
+                def items = output[name]
+                assert items.size() == 1 : "one output for ${name}"
+                def row = items[0]
+                assert row.size() == 2 : "metadata/file tuple for ${name}"
+                def path = new File(row[1].toString())
+                assert path.isFile() && path.length() > 0 : "nonempty ${name}"
+                path
+            }
+            def globalPath = { name ->
+                def items = output[name]
+                assert items.size() == 1 : "one output for ${name}"
+                def path = new File(items[0].toString())
+                assert path.isFile() && path.length() > 0 : 'nonempty global artifact'
+                path
+            }
+            def expectedOutputNames = (sampleNames + ['versions', 'versions_mqc']).toSet()
+            def paths = sampleNames.collectEntries { name -> [(name): samplePath(name)] }
+            paths.versions = globalPath('versions')
+            paths.versions_mqc = globalPath('versions_mqc')
+
+            def lines = { File path ->
+                path.name.endsWith('.gz') ?
+                    new java.util.zip.GZIPInputStream(new FileInputStream(path)).withCloseable { it.text.readLines() } :
+                    path.readLines()
+            }
+            def vcfRecords = { File path ->
+                def rows = lines(path)
+                assert rows.any { it.startsWith('#CHROM\t') }
+                def records = rows.findAll { !it.startsWith('#') }.collect { it.split('\t', -1) }
+                assert records && records.every { it.size() >= 10 }
+                records
+            }
+            def gridss = vcfRecords(paths.gridss_vcf)
+            def annotated = vcfRecords(paths.annotsv_vcf)
+            def recordProjection = { records ->
+                records.collect { row -> [row[0].replaceFirst('^chr', ''), row[1] as Integer,
+                                          row[2], row[3], row[4]] }
+                       .sort { a, b -> (a[0] <=> b[0]) ?: (a[1] <=> b[1]) ?: (a[2] <=> b[2]) }
+            }
+
+            def tsv = lines(paths.annotsv_tsv).collect { it.split('\t', -1) }
+            def columns = tsv[0]
+            assert ['ID', 'AnnotSV_ID', 'SV_chrom', 'SV_start', 'SV_end', 'Samples_ID'].every { columns.contains(it) }
+            def annotations = tsv.drop(1).collect { values ->
+                def row = [columns, values].transpose().collectEntries { pair -> [(pair[0]): pair[1]] }
+                [row.ID, row.AnnotSV_ID, row.SV_chrom.replaceFirst('^chr', ''),
+                 row.SV_start as Integer, row.SV_end as Integer, row.Samples_ID]
+            }.sort { a, b -> a[0] <=> b[0] }
+
+            def diagnostics = lines(paths.annotsv_unannotated_tsv).collect { row ->
+                def match = row =~ /^(\S+): (.+) \(line [1-9][0-9]*\)$/
+                assert match.matches() : "unannotated diagnostic: ${row}"
+                [match[0][1], match[0][2]]
+            }.sort { a, b -> a[0] <=> b[0] }
+            def versionsText = paths.versions.text.toLowerCase()
+            def versions = ['annotsv', 'gridss', 'tabix'].collectEntries { tool ->
+                def match = versionsText =~ /(?m)^\s*${tool}:\s*[^\n]*?(\d+\.\d+(?:\.\d+)?)/
+                assert match.find() : "missing ${tool} version"
+                [(tool): match.group(1)]
+            }
+            def mqc = paths.versions_mqc.text.toLowerCase()
+            assert mqc.contains('software_versions') && mqc.contains('html')
+            def namedTools = ['annotsv', 'gridss', 'tabix'].findAll { mqc.contains(it) }
+            def tbiHeader = new java.util.zip.GZIPInputStream(new FileInputStream(paths.gridss_tbi))
+                .withCloseable { stream -> (0..<4).collect { stream.read() } }
+
+            def standardized = [
+                annotated_records: recordProjection(annotated),
+                annotations: annotations,
+                gridss_records: recordProjection(gridss),
+                multiqc_named_tools: namedTools,
+                unannotated_diagnostics: diagnostics,
+                versions: versions
+            ]
+            def vcfSamples = { File path ->
+                lines(path).find { it.startsWith('#CHROM\t') }.split('\t')[9..-1]
+            }
+            def outputContract = [
+                sample_metadata: sampleNames.collectEntries { name -> [(name): output[name][0][0]] },
+                gridss_tbi_header: tbiHeader,
+                global_filenames: [versions: paths.versions.name, versions_mqc: paths.versions_mqc.name],
+                vcf_samples: [gridss: vcfSamples(paths.gridss_vcf), annotsv: vcfSamples(paths.annotsv_vcf)]
+            ]
+            assertAll(
+                { assert workflow.success },
+                { assert output.keySet().findAll { key -> !(key.toString() ==~ /[0-9]+/) }.toSet() == expectedOutputNames : 'expected named workflow output channels' },
+                { assert snapshot(standardized).match('normalized-oracle') },
+                { assert snapshot(outputContract).match('output-contract') }
+            )
+        }
+    }
+
+}

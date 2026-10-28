@@ -58,8 +58,8 @@ The pipeline can perform the following steps:
   *note*: If a list of genes is added using `--gene_list` and GLOWgenes is enabled, the genes in the list will be assigned position 0 (regardless of whether the GLOWgenes ranking was added using `--glowgenes_ranking` or was generated from the gene list). 
   - Additionally, you can include the Gene-Disease Specificity Score (SGDS) using: `--sgds`. This score ranges from 0 to 1, where 1 indicates a gene ranks highly for only a few specific diseases (high specificity), and 0 indicates the gene consistently ranks highly across many diseases (low specificity). 
 
-- **Structural variants (SVs) analysis (`--svs = true and --ngs_type = wgs`):** For WGS, [Manta germline](https://github.com/Illumina/manta) is used for calling structural variants (SVs) from mapped paired-end sequencing reads. Manta will analyse each sample separately by default. For joint analysis of small sets of individuals set `manta_joint = true`. It also includes the following step:
-  - **SVs Annotation**: [AnnotSV](https://lbgi.fr/AnnotSV/) is used to annotate the merged results. AnnotSV needs the annotations files. They can be downloaded using `annotsv_install_annotations = true`. The path to the notes folder can be specified using `--annotsv_annotations folder_path`. If `--annotsv_annotations` is not specified, the annotations files will be downloadad directly.
+- **Structural variants (SVs) analysis (`--svs = true and --ngs_type = wgs`):** For WGS, all available SV callers are run together. Currently, [Manta germline](https://github.com/Illumina/manta) and [Delly](https://github.com/dellytools/delly) are used for calling structural variants (SVs) from mapped paired-end sequencing reads. Manta will analyse each sample separately by default. For joint analysis of small sets of individuals set `manta_joint = true`. Delly is run as a standalone subworkflow per sample and emits raw VCF files with a TBI index.
+  - **SVs Annotation**: [AnnotSV](https://lbgi.fr/AnnotSV/) is used to annotate Manta and Delly results. AnnotSV needs the annotations files. They can be downloaded using `annotsv_install_annotations = true`. The path to the notes folder can be specified using `--annotsv_annotations folder_path`. If `--annotsv_annotations` is not specified, the annotations files will be downloadad directly.
 
 - **Copy number variants (CNVs) calling** (`--svs = true and --ngs_type = wes`), with the following steps for WES:
   - **Bed file filtering**: Module to filter the bed file used for targered sequencing, to keep only the regions with a length > `--min_target` (default 20) and to exclude the regions in `--chromosomes` (default 'chrX,X,chrY,Y,chrM,MT'). 
@@ -122,5 +122,3 @@ CBRA was developed within the framework of a call for intramural cooperative and
 - [Rafa Farias Varona](https://github.com/RafaFariasVarona)
 - [Pablo Minguez](https://github.com/pminguez)
 - [Daniel Lopez](https://github.com/dlopez-bioinfo)
-
-
