@@ -1,11 +1,11 @@
 nextflow_workflow {
 
-    name "Test Subworkflow SV_CALLING_DELLY"
+    name "Test Subworkflow DELLY_ANNOTSV"
     script "../main.nf"
-    workflow "SV_CALLING_DELLY"
+    workflow "DELLY_ANNOTSV"
 
     tag "subworkflows"
-    tag "subworkflows/sv_calling_delly"
+    tag "subworkflows/delly_annotsv"
     tag "delly"
     tag "delly/call"
     tag "bcftools"
@@ -13,7 +13,7 @@ nextflow_workflow {
     tag "annotsv"
     tag "annotsv/annotsv"
 
-    test("sv_calling_delly - bam - raw vcf and annotsv - stub") {
+    test("delly_annotsv - bam - raw vcf and annotsv - stub") {
 
         config "./nextflow.config"
         options "-stub"

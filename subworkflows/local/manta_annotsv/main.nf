@@ -1,7 +1,7 @@
 include { MANTA_GERMLINE          } from '../../../modules/nf-core/manta/germline/main'
 include { ANNOTSV_ANNOTSV         } from '../../../modules/nf-core/annotsv/annotsv/main'
 
-workflow SV_CALLING {
+workflow MANTA_ANNOTSV {
 
     take:
     ch_bam                // channel (mandatory): [ val(meta), path(bam), path(bai) ]
