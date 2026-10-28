@@ -45,14 +45,14 @@
                 "versions": [
                     "bcftools_index_versions.yml:md5,67f215b1f2d614ad6f55af4457b88ff1",
                     "delly_versions.yml:md5,eda0f6ad70bce36ba9b504349e18e6e8",
-                    "versions.yml:md5,b2d1127ba85dbc7abc7f19f244b0e77b"
+                    "versions.yml:md5,3b92600984270642801b69ec40324d8f"
                 ]
             }
         ],
-        "timestamp": "2026-09-23T16:14:22.591904404",
+        "timestamp": "2026-10-28T14:10:59.175524728",
         "meta": {
             "nf-test": "0.9.5",
-            "nextflow": "25.04.6"
+            "nextflow": "26.04.6"
         }
     }
 }

@@ -66,5 +66,10 @@ process ANNOTSV_ANNOTSV {
     touch ${prefix}.tsv
     touch ${prefix}.unannotated.tsv
     ${create_vcf}
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        annotsv: \$(echo \$(AnnotSV -help 2>&1 | head -n1 | sed 's/^AnnotSV //'))
+    END_VERSIONS
     """
 }
