@@ -1,0 +1,282 @@
+nextflow_pipeline {
+
+    name "Test pipeline --sv_tools selection and validation"
+    script "../main.nf"
+
+    tag "pipeline"
+    tag "sv_tools"
+
+    options "-stub"
+
+    // Shared expectations, taken from the --sv_tools parse and validate contract in
+    // agents_data/plans/feat-sv-methods-workflow-integration.plan.md (not from the implementation).
+    def unknownNameValueError = '* --sv_tools (manta,foo): "manta,foo" does not match regular expression'
+    def unknownNameAcceptedValues = '(Invalid SV tool name. Accepted values: manta, delly, gridss (comma-separated).)'
+    def emptySelectionWarning = 'No SV tools have been selected (--sv_tools is empty): at least one SV tool is required (accepted values: manta, delly, gridss), so no SV results will be returned.'
+
+    // Inputs (Scenario A): tracked one-sample samplesheet with a remote BAM, a compatible remote
+    // FASTA/FAI, a tracked Manta config, and a tracked directory as AnnotSV annotations stand-in
+    // (stubs never read it; passing it keeps ANNOTSV_INSTALLANNOTATIONS from running).
+    def testdataBase = 'https://raw.githubusercontent.com/nf-core/test-datasets/modules/data/'
+
+    // Task names from the trace, without the "(tag)" suffix.
+    def taskNames = { wf -> (wf.trace?.tasks() ?: []).collect { it.name.toString().tokenize(' ')[0] } }
+    // Tasks belonging to one SV method subworkflow, e.g. svTasks(names, 'MANTA').
+    def svTasks = { names, String method -> names.findAll { it.contains(":${method}_ANNOTSV:") } }
+    def anySvTasks = { names -> names.findAll { it =~ /:(MANTA|DELLY|GRIDSS)_ANNOTSV:/ } }
+    // Console stdout/stderr plus the run's nextflow.log. The log is included because Nextflow's
+    // console format depends on the environment (e.g. its agent output mode omits WARN lines).
+    def allOutput = { wf, runDir ->
+        def nextflowLog = new File("${runDir}/meta/nextflow.log")
+        (((wf.stdout ?: []) + (wf.stderr ?: [])) + (nextflowLog.exists() ? [ nextflowLog.text ] : [])).join('\n')
+    }
+    // Every SV output location, current (Step 3) and target (Step 4).
+    def svOutputDirs = [ 'SVs', 'svs', 'manta', 'delly', 'gridss' ]
+
+    test("sv_tools = 'manta' - only MANTA_ANNOTSV runs") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'manta'
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.success },
+                { assert svTasks(names, 'MANTA').count { it.endsWith(':MANTA_GERMLINE') } == 1 : "one Manta call for Sample1: ${names}" },
+                { assert svTasks(names, 'MANTA').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one Manta AnnotSV run for Sample1: ${names}" },
+                { assert svTasks(names, 'DELLY').isEmpty() : "no Delly task expected: ${svTasks(names, 'DELLY')}" },
+                { assert svTasks(names, 'GRIDSS').isEmpty() : "no GRIDSS task expected: ${svTasks(names, 'GRIDSS')}" },
+                { assert !names.any { it.endsWith(':BWA_INDEX') } : "no BWA index without GRIDSS or mapping: ${names}" }
+            )
+        }
+    }
+
+    test("sv_tools = ' delly , delly ' - whitespace and duplicates run DELLY_ANNOTSV once") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = ' delly , delly '
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.success },
+                { assert svTasks(names, 'DELLY').count { it.endsWith(':DELLY_CALL') } == 1 : "one Delly call for Sample1: ${names}" },
+                { assert svTasks(names, 'DELLY').count { it.endsWith(':BCFTOOLS_INDEX') } == 1 : "one Delly index for Sample1: ${names}" },
+                { assert svTasks(names, 'DELLY').count { it.endsWith(':ANNOTSV_ANNOTSV') } == 1 : "one Delly AnnotSV run for Sample1: ${names}" },
+                { assert svTasks(names, 'MANTA').isEmpty() : "no Manta task expected: ${svTasks(names, 'MANTA')}" },
+                { assert svTasks(names, 'GRIDSS').isEmpty() : "no GRIDSS task expected: ${svTasks(names, 'GRIDSS')}" }
+            )
+        }
+    }
+
+    test("sv_tools = 'manta,foo' - WGS SV run fails schema validation before any task") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'manta,foo'
+            }
+        }
+
+        then {
+            def output = allOutput(workflow, "$launchDir")
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains(unknownNameValueError) : "schema error naming the invalid value" },
+                { assert output.contains(unknownNameAcceptedValues) : "schema errorMessage listing accepted values" },
+                { assert names.isEmpty() : "no task may start: ${names}" }
+            )
+        }
+    }
+
+    test("sv_tools = 'manta,foo' with svs = false - fails schema validation before any task") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = false
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'manta,foo'
+            }
+        }
+
+        then {
+            def output = allOutput(workflow, "$launchDir")
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains(unknownNameValueError) : "schema error naming the invalid value" },
+                { assert output.contains(unknownNameAcceptedValues) : "schema errorMessage listing accepted values" },
+                { assert names.isEmpty() : "no task may start: ${names}" }
+            )
+        }
+    }
+
+    test("sv_tools = 'manta,foo' with ngs_type = 'wes' - fails schema validation before any task") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wes'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'manta,foo'
+            }
+        }
+
+        then {
+            def output = allOutput(workflow, "$launchDir")
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.failed },
+                { assert output.contains(unknownNameValueError) : "schema error naming the invalid value" },
+                { assert output.contains(unknownNameAcceptedValues) : "schema errorMessage listing accepted values" },
+                { assert names.isEmpty() : "no task may start: ${names}" }
+            )
+        }
+    }
+
+    test("sv_tools = '' - empty selection warns and runs no SV process") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = ''
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.success },
+                { assert allOutput(workflow, "$launchDir").contains(emptySelectionWarning) : "empty-selection warning from the contract" },
+                { assert anySvTasks(names).isEmpty() : "no SV task expected: ${anySvTasks(names)}" },
+                { assert svOutputDirs.every { !new File("$outputDir/$it").exists() } : "no SV output directory expected" }
+            )
+        }
+    }
+
+    test("sv_tools = ' , ' - separators only warn and run no SV process") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = true
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = ' , '
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.success },
+                { assert allOutput(workflow, "$launchDir").contains(emptySelectionWarning) : "empty-selection warning from the contract" },
+                { assert anySvTasks(names).isEmpty() : "no SV task expected: ${anySvTasks(names)}" },
+                { assert svOutputDirs.every { !new File("$outputDir/$it").exists() } : "no SV output directory expected" }
+            )
+        }
+    }
+
+    test("svs = false, sv_tools = 'manta' - SV analysis disabled, no warning") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                input               = "${projectDir}/assets/samplesheet_test.csv"
+                fasta               = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta'
+                fai                 = testdataBase + 'genomics/homo_sapiens/genome/genome.fasta.fai'
+                annotsv_annotations = "${projectDir}/tests/config"
+                manta_config        = "${projectDir}/assets/configManta.ini"
+                ngs_type            = 'wgs'
+                svs                 = false
+                mapping             = false
+                variant_calling     = false
+                annotation          = false
+                sv_tools            = 'manta'
+            }
+        }
+
+        then {
+            def names = taskNames(workflow)
+            assertAll(
+                { assert workflow.success },
+                { assert anySvTasks(names).isEmpty() : "no SV task expected: ${anySvTasks(names)}" },
+                { assert !allOutput(workflow, "$launchDir").contains('No SV tools have been selected') : "no empty-selection warning with --svs false" },
+                { assert svOutputDirs.every { !new File("$outputDir/$it").exists() } : "no SV output directory expected" }
+            )
+        }
+    }
+}

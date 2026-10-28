@@ -485,29 +485,39 @@ workflow SNVS {
             ch_manta_config = params.manta_config
                 ? Channel.fromPath(params.manta_config, checkIfExists: true).collect()
                 : Channel.empty()
-		
-            MANTA_ANNOTSV (
-                ch_bam_svs,
-                ch_fasta,
-                ch_fai,
-                ch_manta_config,
-                annotations,
-                ch_candidate_genes,
-                ch_false_positive_snv,
-                ch_gene_transcripts
-            )
-            ch_versions = ch_versions.mix(MANTA_ANNOTSV.out.versions)
 
-            DELLY_ANNOTSV (
-                ch_bam_svs,
-                ch_fasta,
-                ch_fai,
-                annotations,
-                ch_candidate_genes,
-                ch_false_positive_snv,
-                ch_gene_transcripts
-            )
-            ch_versions = ch_versions.mix(DELLY_ANNOTSV.out.versions)
+            // Unknown names are rejected by schema validation before this point
+            def sv_tools = params.sv_tools.toString().tokenize(',').collect { it.trim() }.findAll { it }.unique()
+            if (!sv_tools) {
+                log.warn "No SV tools have been selected (--sv_tools is empty): at least one SV tool is required (accepted values: manta, delly, gridss), so no SV results will be returned."
+            }
+
+            if ('manta' in sv_tools) {
+                MANTA_ANNOTSV (
+                    ch_bam_svs,
+                    ch_fasta,
+                    ch_fai,
+                    ch_manta_config,
+                    annotations,
+                    ch_candidate_genes,
+                    ch_false_positive_snv,
+                    ch_gene_transcripts
+                )
+                ch_versions = ch_versions.mix(MANTA_ANNOTSV.out.versions)
+            }
+
+            if ('delly' in sv_tools) {
+                DELLY_ANNOTSV (
+                    ch_bam_svs,
+                    ch_fasta,
+                    ch_fai,
+                    annotations,
+                    ch_candidate_genes,
+                    ch_false_positive_snv,
+                    ch_gene_transcripts
+                )
+                ch_versions = ch_versions.mix(DELLY_ANNOTSV.out.versions)
+            }
         }
     }
 
