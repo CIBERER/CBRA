@@ -10,7 +10,7 @@ Initial release of CIBERER/CBRA, created with the [nf-core](https://nf-co.re/) t
 ### `Added`
 
 - `--sv_tools` parameter to select the WGS structural variant methods to run (`manta`, `delly`, `gridss`; default `manta,delly,gridss`). Unknown names are rejected by parameter validation; an empty selection logs a warning and runs no SV method.
-- GRIDSS structural variant calling with AnnotSV annotation for WGS. GRIDSS uses the BWA index from `--index` only when its files are named after the FASTA file name (`<fasta>.bwt`, ...); otherwise it builds its own BWA index in each task.
+- GRIDSS structural variant calling with AnnotSV annotation for WGS. GRIDSS uses the BWA index from `--index` whatever its file prefix, or the index built once from `--fasta`, and builds its own index for the task only when `--index` does not hold one complete BWA index (`.amb`, `.ann`, `.bwt`, `.pac`, `.sa`); the `gridss/gridss` module carries a local patch that links the index under the FASTA file name.
 
 ### `Changed`
 

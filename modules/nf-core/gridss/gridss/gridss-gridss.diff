@@ -1,0 +1,28 @@
+Changes in component 'nf-core/gridss/gridss'
+'modules/nf-core/gridss/gridss/environment.yml' is unchanged
+'modules/nf-core/gridss/gridss/meta.yml' is unchanged
+Changes in 'gridss/gridss/main.nf':
+--- modules/nf-core/gridss/gridss/main.nf
++++ modules/nf-core/gridss/gridss/main.nf
+@@ -23,7 +23,16 @@
+     script:
+     def args = task.ext.args ?: ''
+     def prefix = task.ext.prefix ?: "${meta.id}"
+-    def bwa = bwa_index ? "cp -s ${bwa_index}/* ." : ""
++    // Link a complete BWA index (prefix from its single *.amb) under the FASTA name; otherwise GRIDSS builds its own.
++    def bwa = bwa_index ? """\
++    set -- ${bwa_index}/*.amb
++    bwa_prefix=\${1%.amb}
++    if [ \$# -eq 1 ] && [ -e "\$bwa_prefix.amb" ] && [ -e "\$bwa_prefix.ann" ] \\
++        && [ -e "\$bwa_prefix.bwt" ] && [ -e "\$bwa_prefix.pac" ] && [ -e "\$bwa_prefix.sa" ]; then
++        for suffix in amb ann bwt pac sa; do
++            ln -s "\$bwa_prefix.\$suffix" "${fasta}.\$suffix"
++        done
++    fi""" : ""
+     """
+     ${bwa}
+ 
+
+'modules/nf-core/gridss/gridss/tests/main.nf.test.snap' is unchanged
+'modules/nf-core/gridss/gridss/tests/main.nf.test' is unchanged
+************************************************************

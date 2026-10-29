@@ -122,7 +122,7 @@ For SVs calling (`--svs true`), there are two subworkflows available, depending 
      - An empty selection with `--svs true --ngs_type wgs` logs a warning and runs no SV method, so no SV results are returned. Pass an empty value as `--sv_tools=`, `--sv_tools ' '` or `sv_tools: ''` in a params file. Do not use `--sv_tools ''` (or `--sv_tools` without a value): Nextflow reads it as the value `true`, which fails validation.
      - To disable SV analysis entirely, set `--svs false`. With `--ngs_type wes`, a valid `--sv_tools` selection is ignored and the WES CNV programs described above are used instead.
      - Manta will analyse each sample separately by default. For joint analysis of small sets of individuals set `manta_joint = true`. A custom Manta configuration file can be provided with `--manta_config`. `--manta_config` and `--manta_joint` only apply to Manta. More information [here](https://github.com/Illumina/manta/blob/master/docs/userGuide/README.md).
-     - GRIDSS needs a BWA index of the reference genome. The index given with `--index` is used by GRIDSS only when its files are named after the FASTA file name (`<fasta>.bwt`, ...); otherwise, including when the index is built from `--fasta`, GRIDSS builds its own BWA index in each task.
+     - GRIDSS needs a BWA index of the reference genome. GRIDSS uses the index given with `--index`, whatever its file prefix, or, when `--index` is not given, the index built once from `--fasta`; it does not rebuild the index in each task. If the `--index` directory does not hold one complete BWA index (a single `<prefix>.amb` with the matching `.ann`, `.bwt`, `.pac` and `.sa` files), GRIDSS builds its own BWA index for the task.
 
 ### Updating the pipeline
 

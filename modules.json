@@ -173,6 +173,12 @@
             "git_sha": "666652151335353eef2fcd58880bcef5bc2928e1",
             "installed_by": ["modules"]
           },
+          "gridss/gridss": {
+            "branch": "master",
+            "git_sha": "066da9c5f80fbc42ec51bb720956e5213a4aa657",
+            "installed_by": ["modules"],
+            "patch": "modules/nf-core/gridss/gridss/gridss-gridss.diff"
+          },
           "manta/germline": {
             "branch": "master",
             "git_sha": "3485512d3930df1fcb66b5f92af639179bdfe4be",

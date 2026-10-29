@@ -1,0 +1,143 @@
+nextflow_workflow {
+    name "GRIDSS_ANNOTSV uses the BWA index derived by BWA_INDEX"
+    script "../main.nf"
+    config "./nextflow.config"
+    workflow "GRIDSS_ANNOTSV"
+
+    tag "subworkflows"
+    tag "subworkflows_nfcore"
+    tag "subworkflows/gridss_annotsv"
+    tag "gridss_annotsv"
+    tag "gridss"
+    tag "gridss/gridss"
+    tag "tabix"
+    tag "tabix/tabix"
+    tag "annotsv"
+    tag "annotsv/annotsv"
+    tag "custom"
+    tag "custom/dumpsoftwareversions"
+    tag "bwa"
+    tag "bwa/index"
+
+    setup {
+        run("BWA_INDEX") {
+            script "../../../../modules/nf-core/bwa/index/main.nf"
+            process {
+                """
+                // Pinned literal: the setup run must not depend on params set in the test's when block.
+                def setupSource = 'https://raw.githubusercontent.com/nf-core/test-datasets/c16e7bd8bbc7ed534a3652a608ed0b2098037bdd/data/genomics/homo_sapiens'
+                input[0] = [[id: 'reference'], file("\${setupSource}/genome/genome.fasta", checkIfExists: true)]
+                """
+            }
+        }
+    }
+
+    test("homo_sapiens GRCh38 chr22 - paired sorted BAM/BAI sample1 - GRIDSS reuses the BWA_INDEX index") {
+        when {
+            params {
+                modules_testdata_base_path = 'https://raw.githubusercontent.com/nf-core/test-datasets/c16e7bd8bbc7ed534a3652a608ed0b2098037bdd/data/'
+                cbra_test_root = projectDir
+                tabix_args = '-p vcf'
+                annotsv_args = '-vcf 1'
+            }
+            workflow {
+                """
+                def root = params.cbra_test_root
+                def source = params.modules_testdata_base_path + 'genomics/homo_sapiens'
+                input[0] = Channel.of([
+                    [id: 'sample1', single_end: false],
+                    file("\${source}/illumina/bam/test.rna.paired_end.sorted.bam", checkIfExists: true),
+                    file("\${source}/illumina/bam/test.rna.paired_end.sorted.bam.bai", checkIfExists: true)
+                ])
+                input[1] = Channel.of([[id: 'reference'], file("\${source}/genome/genome.fasta", checkIfExists: true)])
+                input[2] = Channel.of([[id: 'reference'], file("\${source}/genome/genome.fasta.fai", checkIfExists: true)])
+                input[3] = BWA_INDEX.out.index
+                input[4] = Channel.of([[id: 'annotations'], file("\${root}/agents_data/reference-data", checkIfExists: true)])
+                """
+            }
+        }
+
+        then {
+            // 1. The run itself must succeed.
+            assert workflow.success : 'GRIDSS_ANNOTSV workflow run did not succeed'
+
+            // 2. Locate exactly one GRIDSS_GRIDSS task work directory in this test's Nextflow work dir.
+            def nextflowWorkDir = new File(workDir.toString())
+            assert nextflowWorkDir.isDirectory() : "nf-test work directory not found: ${nextflowWorkDir}"
+            // Task dirs follow <workDir>/<2-char prefix>/<hash>/; do not recurse into staged (symlinked) inputs.
+            def gridssTaskDirs = (nextflowWorkDir.listFiles() ?: [])
+                .findAll { it.isDirectory() }
+                .collectMany { prefixDir -> (prefixDir.listFiles() ?: []).findAll { it.isDirectory() } as List }
+                .findAll { candidate ->
+                    def command = new File(candidate, '.command.sh')
+                    command.isFile() && command.text =~ /(?m)^\s*gridss\s/ && command.text.contains('--reference')
+                }
+            assert gridssTaskDirs.size() == 1 : "expected exactly one GRIDSS_GRIDSS task, found ${gridssTaskDirs.size()}: ${gridssTaskDirs}"
+            def taskDir = gridssTaskDirs[0]
+            def commandScript = new File(taskDir, '.command.sh').text
+            def indexSuffixes = ['amb', 'ann', 'bwt', 'pac', 'sa']
+
+            // 3. Locate exactly one BWA_INDEX task dir: it owns a real (non-symlink) bwa/ directory.
+            def bwaIndexTaskDirs = (nextflowWorkDir.listFiles() ?: [])
+                .findAll { it.isDirectory() }
+                .collectMany { prefixDir -> (prefixDir.listFiles() ?: []).findAll { it.isDirectory() } as List }
+                .findAll { candidate ->
+                    def command = new File(candidate, '.command.sh')
+                    def bwaDir = new File(candidate, 'bwa').toPath()
+                    command.isFile() && command.text.contains('-p bwa/') &&
+                        java.nio.file.Files.isDirectory(bwaDir, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                }
+            assert bwaIndexTaskDirs.size() == 1 : "expected exactly one BWA_INDEX task, found ${bwaIndexTaskDirs.size()}: ${bwaIndexTaskDirs}"
+            def bwaIndexDir = new File(bwaIndexTaskDirs[0], 'bwa')
+
+            def output = workflow.out
+            // Expected targets come from the fixed input name: BWA_INDEX writes bwa/<fasta.baseName>.<suffix> = bwa/genome.<suffix>.
+            def indexLinkFailures = indexSuffixes.collect { suffix ->
+                def link = new File(taskDir, "genome.fasta.${suffix}").toPath()
+                def expected = new File(bwaIndexDir, "genome.${suffix}").toPath()
+                if (!java.nio.file.Files.isSymbolicLink(link)) {
+                    return "${link.fileName}: not a symbolic link".toString()
+                }
+                if (!java.nio.file.Files.isRegularFile(expected, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    return "${link.fileName}: expected BWA_INDEX file ${expected} is missing".toString()
+                }
+                if (!java.nio.file.Files.exists(link)) {
+                    return "${link.fileName}: dangling link to ${java.nio.file.Files.readSymbolicLink(link)}".toString()
+                }
+                def resolved = link.toRealPath()
+                resolved == expected.toRealPath() ? null : "${link.fileName}: resolves to ${resolved}, expected ${expected.toRealPath()}".toString()
+            }.findAll { it != null }
+            def bwaRebuildLines = ['.command.log', '.command.err'].collectMany { logName ->
+                def log = new File(taskDir, logName)
+                def matches = []
+                if (log.isFile()) {
+                    log.eachLine { line, number ->
+                        if (line =~ /Running\s+bwa index/) {
+                            matches << "${logName}:${number}: ${line}".toString()
+                        }
+                    }
+                }
+                matches
+            }
+            def rebuiltIndexFiles = indexSuffixes.collect { suffix -> new File(taskDir, "genome.fasta.${suffix}") }
+                .findAll { file -> java.nio.file.Files.isRegularFile(file.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS) }
+                .collect { file -> file.name }
+            def nonEmptyOutput = { name ->
+                def items = output[name]
+                items.size() == 1 && new File(items[0][1].toString()).with { it.isFile() && it.length() > 0 }
+            }
+
+            assertAll(
+                // 4. The index is presented under the FASTA file name by symlinks, not by copying the directory.
+                { assert !(commandScript =~ /(?m)^\s*cp\s+-s\b/) : "GRIDSS .command.sh still has a cp -s line (task dir ${taskDir})" },
+                { assert indexLinkFailures.isEmpty() : "genome.fasta.{amb,ann,bwt,pac,sa} in GRIDSS task dir ${taskDir} are not symlinks to BWA_INDEX ${bwaIndexDir}/genome.*: ${indexLinkFailures}" },
+                // 5. GRIDSS did not rebuild the BWA index on its own.
+                { assert bwaRebuildLines.isEmpty() : "GRIDSS rebuilt the BWA index instead of using BWA_INDEX output: ${bwaRebuildLines}" },
+                { assert rebuiltIndexFiles.isEmpty() : "GRIDSS wrote its own BWA index files as regular files in ${taskDir}: ${rebuiltIndexFiles}" },
+                // 6. Light output checks.
+                { assert nonEmptyOutput('gridss_vcf') : 'expected exactly one non-empty GRIDSS VCF' },
+                { assert nonEmptyOutput('annotsv_tsv') : 'expected exactly one non-empty AnnotSV TSV' }
+            )
+        }
+    }
+}
