@@ -1,9 +1,9 @@
 .nf-test*
 .nextflow/
 work/
+.codex-cluster/jobid
+agents_data/reference-data/
 manual_outputs/
 project_docs/
-
 .nextflow.log*
-
 null/pipeline_info
