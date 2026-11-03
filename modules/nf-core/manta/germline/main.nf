@@ -73,5 +73,10 @@ process MANTA_GERMLINE {
     touch ${prefix}.candidate_sv.vcf.gz.tbi
     echo "" | gzip > ${prefix}.diploid_sv.vcf.gz
     touch ${prefix}.diploid_sv.vcf.gz.tbi
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        manta: \$( configManta.py --version )
+    END_VERSIONS
     """
 }

@@ -330,6 +330,13 @@
                     "type": "boolean",
                     "description": "Boolean value to indicate if manta should run samples one by one or together (join calling)."
                 },
+                "sv_tools": {
+                    "type": "string",
+                    "default": "manta,delly,gridss",
+                    "description": "Comma-separated SV methods to run on WGS. Accepted values: manta, delly, gridss. Default: manta,delly,gridss.",
+                    "pattern": "^\\s*(manta|delly|gridss)?\\s*(,\\s*(manta|delly|gridss)?\\s*)*$",
+                    "errorMessage": "Invalid SV tool name. Accepted values: manta, delly, gridss (comma-separated)."
+                },
                 "min_target": {
                     "type": "integer",
                     "default": 20,

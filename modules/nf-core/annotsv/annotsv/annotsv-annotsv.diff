@@ -1,5 +1,6 @@
 Changes in component 'nf-core/annotsv/annotsv'
 'modules/nf-core/annotsv/annotsv/environment.yml' is unchanged
+'modules/nf-core/annotsv/annotsv/meta.yml' is unchanged
 Changes in 'annotsv/annotsv/main.nf':
 --- modules/nf-core/annotsv/annotsv/main.nf
 +++ modules/nf-core/annotsv/annotsv/main.nf
@@ -28,9 +29,19 @@ Changes in 'annotsv/annotsv/main.nf':
      """
  
      stub:
+@@ -59,5 +66,10 @@
+     touch ${prefix}.tsv
+     touch ${prefix}.unannotated.tsv
+     ${create_vcf}
++
++    cat <<-END_VERSIONS > versions.yml
++    "${task.process}":
++        annotsv: \$(echo \$(AnnotSV -help 2>&1 | head -n1 | sed 's/^AnnotSV //'))
++    END_VERSIONS
+     """
+ }
 
-'modules/nf-core/annotsv/annotsv/meta.yml' is unchanged
-'modules/nf-core/annotsv/annotsv/tests/main.nf.test' is unchanged
 'modules/nf-core/annotsv/annotsv/tests/main.nf.test.snap' is unchanged
 'modules/nf-core/annotsv/annotsv/tests/nextflow.config' is unchanged
+'modules/nf-core/annotsv/annotsv/tests/main.nf.test' is unchanged
 ************************************************************

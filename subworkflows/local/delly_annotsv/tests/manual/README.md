@@ -1,6 +1,6 @@
 # Manual Delly Calling Smoke Test
 
-This helper runs only the `SV_CALLING_DELLY` subworkflow with Delly's example
+This helper runs only the `DELLY_ANNOTSV` subworkflow with Delly's example
 short-read data. It is intended for manual validation on machines with
 Nextflow, Singularity, and an AnnotSV annotations directory available.
 
@@ -20,9 +20,9 @@ make PREFIX=. install-human-annotation
 
 ```bash
 ANNOTDIR='../AnnotSV/share/AnnotSV'
-nextflow run subworkflows/local/sv_calling_delly/tests/manual/run_real.nf \
+nextflow run subworkflows/local/delly_annotsv/tests/manual/run_real.nf \
     -c nextflow.config \
-    -c subworkflows/local/sv_calling_delly/tests/manual/run_real.config \
+    -c subworkflows/local/delly_annotsv/tests/manual/run_real.config \
     -profile singularity \
     --annotsv_annotations $ANNOTDIR
 ```

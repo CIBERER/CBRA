@@ -77,8 +77,9 @@ include { DRAGEN_VCF } from '../subworkflows/local/dragen_vcf'
 include { VCF_MERGE_VARIANTCALLERS } from '../subworkflows/local/vcf_merge_variantcallers'
 include { DEEP_VARIANT_VCF           } from '../subworkflows/local/deep_variant_vcf'
 include { SNV_ANNOTATION } from '../subworkflows/local/snv_annotation'
-include { SV_CALLING } from '../subworkflows/local/sv_calling'
-include { SV_CALLING_DELLY } from '../subworkflows/local/sv_calling_delly'
+include { MANTA_ANNOTSV } from '../subworkflows/local/manta_annotsv'
+include { DELLY_ANNOTSV } from '../subworkflows/local/delly_annotsv'
+include { GRIDSS_ANNOTSV } from '../subworkflows/local/gridss_annotsv'
 include { GATK_TRIO_VCF } from '../subworkflows/local/gatk_trio_vcf'
 include { CNVS_CALLING } from '../subworkflows/local/cnvs_calling'
 
@@ -136,7 +137,13 @@ workflow SNVS {
     // See the documentation https://nextflow-io.github.io/nf-validation/samplesheets/fromSamplesheet/
     // ! There is currently no tooling to help you write a sample sheet schema
 
-    if (params.mapping) {
+    // SV methods selected for WGS SV runs; unknown names are rejected by schema validation
+    def sv_tools = (params.svs && params.ngs_type == 'wgs')
+        ? params.sv_tools.toString().tokenize(',').collect { it.trim() }.findAll { it }.unique()
+        : []
+
+    // The BWA index is shared by MAPPING and GRIDSS and provisioned at most once
+    if (params.mapping || 'gridss' in sv_tools) {
         if (params.index) { 
             ch_index = Channel.fromPath(params.index).map{ it -> [ [id:it.baseName], it ] }.collect()
         } else { 
@@ -485,29 +492,49 @@ workflow SNVS {
             ch_manta_config = params.manta_config
                 ? Channel.fromPath(params.manta_config, checkIfExists: true).collect()
                 : Channel.empty()
-		
-            SV_CALLING (
-                ch_bam_svs,
-                ch_fasta,
-                ch_fai,
-                ch_manta_config,
-                annotations,
-                ch_candidate_genes,
-                ch_false_positive_snv,
-                ch_gene_transcripts
-            )
-            ch_versions = ch_versions.mix(SV_CALLING.out.versions)
 
-            SV_CALLING_DELLY (
-                ch_bam_svs,
-                ch_fasta,
-                ch_fai,
-                annotations,
-                ch_candidate_genes,
-                ch_false_positive_snv,
-                ch_gene_transcripts
-            )
-            ch_versions = ch_versions.mix(SV_CALLING_DELLY.out.versions)
+            if (!sv_tools) {
+                log.warn "No SV tools have been selected (--sv_tools is empty): at least one SV tool is required (accepted values: manta, delly, gridss), so no SV results will be returned."
+            }
+
+            if ('manta' in sv_tools) {
+                MANTA_ANNOTSV (
+                    ch_bam_svs,
+                    ch_fasta,
+                    ch_fai,
+                    ch_manta_config,
+                    annotations,
+                    ch_candidate_genes,
+                    ch_false_positive_snv,
+                    ch_gene_transcripts
+                )
+                ch_versions = ch_versions.mix(MANTA_ANNOTSV.out.versions)
+            }
+
+            if ('delly' in sv_tools) {
+                DELLY_ANNOTSV (
+                    ch_bam_svs,
+                    ch_fasta,
+                    ch_fai,
+                    annotations,
+                    ch_candidate_genes,
+                    ch_false_positive_snv,
+                    ch_gene_transcripts
+                )
+                ch_versions = ch_versions.mix(DELLY_ANNOTSV.out.versions)
+            }
+
+            if ('gridss' in sv_tools) {
+                GRIDSS_ANNOTSV (
+                    ch_bam_svs,
+                    ch_fasta,
+                    ch_fai,
+                    ch_index,
+                    annotations
+                )
+                // Consolidated software_versions.yml; versions_mqc is not fed to MultiQC
+                ch_versions = ch_versions.mix(GRIDSS_ANNOTSV.out.versions)
+            }
         }
     }
 

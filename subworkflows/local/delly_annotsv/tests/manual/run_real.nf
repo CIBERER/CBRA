@@ -1,6 +1,6 @@
 nextflow.enable.dsl = 2
 
-include { SV_CALLING_DELLY } from '../../main.nf'
+include { DELLY_ANNOTSV } from '../../main.nf'
 
 workflow {
 
@@ -29,7 +29,7 @@ workflow {
     ch_false_positive_snv = Channel.of([[:], []])
     ch_gene_transcripts = Channel.of([[:], []])
 
-    SV_CALLING_DELLY(
+    DELLY_ANNOTSV(
         ch_bam,
         ch_fasta,
         ch_fai,
@@ -39,10 +39,10 @@ workflow {
         ch_gene_transcripts
     )
 
-    SV_CALLING_DELLY.out.vcf.view { "raw delly vcf: ${it}" }
-    SV_CALLING_DELLY.out.vcf_index.view { "raw delly index: ${it}" }
-    SV_CALLING_DELLY.out.annotated_tsv.view { "annotsv tsv: ${it}" }
-    SV_CALLING_DELLY.out.annotated_vcf.view { "annotsv vcf: ${it}" }
-    SV_CALLING_DELLY.out.unannotated_tsv.view { "annotsv unannotated tsv: ${it}" }
-    SV_CALLING_DELLY.out.versions.view { "versions: ${it}" }
+    DELLY_ANNOTSV.out.vcf.view { "raw delly vcf: ${it}" }
+    DELLY_ANNOTSV.out.vcf_index.view { "raw delly index: ${it}" }
+    DELLY_ANNOTSV.out.annotated_tsv.view { "annotsv tsv: ${it}" }
+    DELLY_ANNOTSV.out.annotated_vcf.view { "annotsv vcf: ${it}" }
+    DELLY_ANNOTSV.out.unannotated_tsv.view { "annotsv unannotated tsv: ${it}" }
+    DELLY_ANNOTSV.out.versions.view { "versions: ${it}" }
 }

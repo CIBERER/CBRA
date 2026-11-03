@@ -2,7 +2,7 @@ include { DELLY_CALL } from '../../../modules/nf-core/delly/call/main'
 include { BCFTOOLS_INDEX } from '../../../modules/nf-core/bcftools/index/main'
 include { ANNOTSV_ANNOTSV } from '../../../modules/nf-core/annotsv/annotsv/main'
 
-workflow SV_CALLING_DELLY {
+workflow DELLY_ANNOTSV {
 
     take:
     ch_bam                 // channel (mandatory): [ val(meta), path(bam), path(bai) ]

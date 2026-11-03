@@ -1,5 +1,6 @@
 Changes in component 'nf-core/manta/germline'
 'modules/nf-core/manta/germline/environment.yml' is unchanged
+'modules/nf-core/manta/germline/meta.yml' is unchanged
 Changes in 'manta/germline/main.nf':
 --- modules/nf-core/manta/germline/main.nf
 +++ modules/nf-core/manta/germline/main.nf
@@ -25,9 +26,19 @@ Changes in 'manta/germline/main.nf':
      """
  
      stub:
+@@ -67,5 +73,10 @@
+     touch ${prefix}.candidate_sv.vcf.gz.tbi
+     echo "" | gzip > ${prefix}.diploid_sv.vcf.gz
+     touch ${prefix}.diploid_sv.vcf.gz.tbi
++
++    cat <<-END_VERSIONS > versions.yml
++    "${task.process}":
++        manta: \$( configManta.py --version )
++    END_VERSIONS
+     """
+ }
 
-'modules/nf-core/manta/germline/meta.yml' is unchanged
-'modules/nf-core/manta/germline/tests/main.nf.test' is unchanged
 'modules/nf-core/manta/germline/tests/main.nf.test.snap' is unchanged
 'modules/nf-core/manta/germline/tests/nextflow.config' is unchanged
+'modules/nf-core/manta/germline/tests/main.nf.test' is unchanged
 ************************************************************

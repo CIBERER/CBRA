@@ -1,0 +1,95 @@
+nextflow_workflow {
+
+    name "Test Subworkflow MANTA_ANNOTSV"
+    script "../main.nf"
+    workflow "MANTA_ANNOTSV"
+
+    tag "subworkflows"
+    tag "subworkflows/manta_annotsv"
+    tag "manta"
+    tag "manta/germline"
+    tag "annotsv"
+    tag "annotsv/annotsv"
+
+    test("manta_annotsv - bam - diploid and candidate sv vcf and annotsv - stub") {
+
+        config "./nextflow.config"
+        options "-stub"
+
+        when {
+            params {
+                cbra_test_root = projectDir
+                manta_joint    = false
+            }
+            workflow {
+                """
+                input[0] = Channel.of([
+                    [ id:'test' ],
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/illumina/bam/test2.paired_end.recalibrated.sorted.bam', checkIfExists:true),
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/illumina/bam/test2.paired_end.recalibrated.sorted.bam.bai', checkIfExists:true)
+                ])
+                input[1] = Channel.of([
+                    [ id:'genome' ],
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/genome/chr21/sequence/genome.fasta', checkIfExists:true)
+                ])
+                input[2] = Channel.of([
+                    [ id:'genome' ],
+                    file(params.modules_testdata_base_path + 'genomics/homo_sapiens/genome/chr21/sequence/genome.fasta.fai', checkIfExists:true)
+                ])
+                // Same shape as workflows/snvs.nf: a collected value channel holding the Manta config
+                input[3] = Channel.fromPath(params.cbra_test_root + '/assets/configManta.ini', checkIfExists:true).collect()
+                input[4] = Channel.of([[ id:'annotations' ], []])
+                input[5] = Channel.of([[:], []])
+                input[6] = Channel.of([[:], []])
+                input[7] = Channel.of([[:], []])
+                """
+            }
+        }
+
+        then {
+            // Expected per-sample outputs, derived from the module stub contracts:
+            // MANTA_GERMLINE writes ${meta.id}.{diploid_sv,candidate_sv}.vcf.gz from `echo "" | gzip`;
+            // ANNOTSV_ANNOTSV touches ${meta.id}.tsv, ${meta.id}.unannotated.tsv and, with -vcf 1, ${meta.id}.vcf.
+            def expected = [
+                annotated_tsv    : [ name: 'test.tsv',                md5: 'd41d8cd98f00b204e9800998ecf8427e' ],
+                annotated_vcf    : [ name: 'test.vcf',                md5: 'd41d8cd98f00b204e9800998ecf8427e' ],
+                unannotated_tsv  : [ name: 'test.unannotated.tsv',    md5: 'd41d8cd98f00b204e9800998ecf8427e' ],
+                diploid_sv_vcf   : [ name: 'test.diploid_sv.vcf.gz',   md5: null ],
+                candidate_sv_vcf : [ name: 'test.candidate_sv.vcf.gz', md5: null ]
+            ]
+            def checkSampleChannel = { String channel ->
+                def items = workflow.out[channel]
+                assert items.size() == 1 : "one emission for ${channel}"
+                def row = items[0]
+                assert row.size() == 2 : "[ meta, file ] tuple for ${channel}"
+                assert row[0] == [ id:'test' ] : "sample metadata for ${channel}"
+                def emitted = new File(row[1].toString())
+                assert emitted.name == expected[channel].name : "file name for ${channel}"
+                assert emitted.isFile() : "file exists for ${channel}"
+                if (expected[channel].md5) {
+                    assert path(row[1].toString()).md5 == expected[channel].md5 : "empty stub file for ${channel}"
+                }
+                if (emitted.name.endsWith('.vcf.gz')) {
+                    // Stub VCF.gz holds a single newline once decompressed
+                    assert path(row[1].toString()).linesGzip == [ '' ] : "stub gzip content for ${channel}"
+                }
+                true
+            }
+            def versionTexts = workflow.out.versions.collect { new File(it.toString()).text }
+
+            assertAll(
+                { assert workflow.success },
+                { assert checkSampleChannel('annotated_tsv') },
+                { assert checkSampleChannel('annotated_vcf') },
+                { assert checkSampleChannel('unannotated_tsv') },
+                { assert checkSampleChannel('diploid_sv_vcf') },
+                { assert checkSampleChannel('candidate_sv_vcf') },
+                { assert workflow.out.versions.size() == 2 : "one versions file per process (Manta, AnnotSV)" },
+                { assert workflow.out.versions.every { new File(it.toString()).name == 'versions.yml' } },
+                { assert versionTexts.count { it =~ /(?m)^"MANTA_ANNOTSV:MANTA_GERMLINE":\n\s+manta: \S+/ } == 1 },
+                { assert versionTexts.count { it =~ /(?m)^"MANTA_ANNOTSV:ANNOTSV_ANNOTSV":\n\s+annotsv: \S+/ } == 1 },
+                { assert snapshot(sanitizeOutput(workflow.out)).match() }
+            )
+        }
+    }
+}
